@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#e9ebef" />
+  <title>美团券夹 · 领券助手</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 背景液态光晕（让毛玻璃透出层次） -->
+  <div class="bg" aria-hidden="true">
+    <span class="blob b1"></span>
+    <span class="blob b2"></span>
+    <span class="blob b3"></span>
+  </div>
+
+  <div class="app">
+    <!-- 顶部品牌 + 搜索 -->
+    <header class="hero">
+      <div class="hero-top">
+        <div class="brand">
+          <span class="brand-logo" id="brandLogo"></span>
+          <span class="brand-name">美团券夹</span>
+          <span class="brand-author">by 6866</span>
+        </div>
+        <div class="hero-top-right">
+          <span class="claim-chip" id="claimChip"><span class="cc-ic" id="claimIc"></span><span id="claimCount">已领 0 次</span></span>
+          <button id="menuBtn" class="icon-btn" title="更多" aria-label="更多"></button>
+        </div>
+      </div>
+      <p class="hero-sub">粘贴美团分享链接，自动识别收藏，一键领券</p>
+
+      <div class="search-wrap" id="searchWrap">
+        <span class="search-ic" id="searchIc"></span>
+        <input id="search" type="text" placeholder="粘贴美团分享链接自动识别" autocomplete="off" />
+        <button class="search-clear hidden" id="searchClear" type="button" aria-label="清空"></button>
+        <span class="search-spinner hidden" id="searchSpinner"></span>
+      </div>
+
+      <!-- 分段筛选 -->
+      <div class="segment" id="segment">
+        <div class="segment-ind" id="segInd"></div>
+        <button class="seg-btn active" data-seg="all">全部</button>
+        <button class="seg-btn" data-seg="todo">待领取</button>
+        <button class="seg-btn" data-seg="done">已领取</button>
+      </div>
+    </header>
+
+    <div class="statbar">
+      <span id="statCount">共 0 个</span>
+      <span class="dot">·</span>
+      <span id="statPinned">置顶 0</span>
+      <span class="dot">·</span>
+      <span id="statClaims">已领 0 次</span>
+      <button class="help-toggle" id="helpToggle">使用说明 ▾</button>
+    </div>
+
+    <div class="help hidden" id="help">
+      <p>① 搜索框粘贴美团店铺分享链接，自动识别 poi_id_str 并收藏。</p>
+      <p>② 点卡片查看详情、复制领取地址、填写备注与 logo。</p>
+      <p>③ 点「领取」自动标记已领取并打开领取通道（v8 / v6 可切号）。</p>
+      <p>④ 数据保存在本机浏览器，作者 <b>6866</b>。</p>
+      <p>⑤ iOS 快捷指令：复制美团分享链接后，用「打开 URL」跳转 <b>?url=链接</b> 自动识别详情；或 <b>?claim=商家poi</b> 直接跳美团领取。</p>
+    </div>
+
+    <main id="list" class="list"></main>
+
+    <div id="empty" class="empty hidden">
+      <div class="empty-emoji" id="emptyIco"></div>
+      <p>粘贴美团店铺链接即可自动识别并收藏</p>
+    </div>
+
+    <footer class="foot">
+      <span>美团券夹</span><span class="foot-sep">·</span>
+      <span class="author">by 6866</span><span class="foot-sep">·</span>
+      <span>本地收藏</span>
+    </footer>
+
+    <button id="addBtn" class="fab" title="新增" aria-label="新增"></button>
+
+    <!-- 详情 / 编辑弹窗 -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-backdrop" data-close></div>
+      <div class="modal-card" id="modalCard">
+        <div class="modal-head">
+          <h2 id="modalTitle">详情</h2>
+          <button class="icon-btn" data-close id="modalClose" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+      </div>
+    </div>
+
+    <!-- 命令面板 -->
+    <div id="palette" class="palette hidden">
+      <div class="palette-backdrop" data-palette-close></div>
+      <div class="palette-card">
+        <div class="palette-input-wrap">
+          <span class="search-ic" id="paletteIc"></span>
+          <input id="paletteInput" type="text" placeholder="输入指令…" autocomplete="off" />
+        </div>
+        <ul id="paletteList" class="palette-list"></ul>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
