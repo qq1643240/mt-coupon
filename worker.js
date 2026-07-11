@@ -324,6 +324,10 @@ export default {
       // 从整段文本抽第一个 http(s) 链接（兼容直接传整段分享话术）
       const linkMatch = String(target).match(/https?:\/\/[^\s"'<>）)\]]+/);
       const link = linkMatch ? linkMatch[0] : target;
+      // 提前校验：如果没抽到链接（纯文本/口令等），直接友好报错，避免后续 new URL() 炸 catch
+      if (!linkMatch || !/^https?:\/\//i.test(link)) {
+        return json({ ok: false, error: '剪贴板内容未包含有效链接，请复制含 dpurl.cn / meituan.com 链接的分享内容后重试。' }, 400);
+      }
       const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
       try {
         const final = await follow(link, ua, 0);
