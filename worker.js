@@ -84,44 +84,47 @@ function extractPoiNum(s) {
   const m = String(s || '').match(/[?&]poiId=(\d+)/);
   return m ? m[1] : null;
 }
-// 从美团页面提取店铺头像（多策略：meta 标签 → JSON 字段 → img 标签）
+// 从美团页面提取店铺真实头像（排除平台 logo）
 function extractLogo(s) {
   if (!s) return null;
-  // 1) 标准 Open Graph meta 标签
-  let v = extractMeta(s, 'og:image');
-  if (v) return v;
-  v = extractMeta(s, 'twitter:image');
-  if (v) return v;
-  // 2) JSON 数据中常见的店铺图片字段（覆盖美团/点评各种命名）
+  // 过滤：是否为平台通用 logo（含 meituan/dianping 品牌标识的图不要）
+  function isPlatformLogo(url) {
+    if (!url) return false;
+    const u = url.toLowerCase();
+    return /(meituan[-_]?logo|dianping[-_]?logo|share.*default|brand.*logo.*platform|appicon|apple-touch-icon|favicon|logo.*meituan\.com|logo.*dianping)/i.test(u)
+      || (u.includes('meituan.com') && /\/(logo|icon|brand|app)\./i.test(u))
+      || (u.includes('dianping.com') && /\/(logo|icon|brand|app)\./i.test(u));
+  }
+  // ====== 第一步：JSON 数据中的店铺图片（最可靠）======
   const jsonFields = [
-    'picUrl', 'logoUrl', 'headImg', 'shopLogo', 'shopLogoUrl',
-    'brandLogo', 'brandLogoUrl', 'avatar', 'photo', 'imageUrl',
-    'logo', 'coverImg', 'frontImg', 'shopIcon', 'poiPic'
+    'picUrl', 'shopLogo', 'shopLogoUrl', 'headImg', 'avatar',
+    'frontImg', 'poiPic', 'shopIcon', 'photo', 'imageUrl',
+    'coverImg', 'logoUrl', 'brandLogo'
   ];
   for (const f of jsonFields) {
-    const m = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\']([^"\']+(?:\\.jpg|\\.jpeg|\\.png|\\.webp|\\.gif|\\/)[^"\']*)["\']', 'i'));
-    if (m && m[1]) return m[1];
+    const m = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\']([^"\']+?)["\']', 'i'));
+    if (m && m[1] && !isPlatformLogo(m[1]) && /\.(jpg|jpeg|png|webp|gif)/i.test(m[1])) return m[1];
     const m2 = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\'](https?://[^"\']+)["\']', 'i'));
-    if (m2 && m2[1] && /\.(jpg|jpeg|png|webp|gif)/i.test(m2[1])) return m2[1];
+    if (m2 && m2[1] && !isPlatformLogo(m2[1]) && /\.(jpg|jpeg|png|webp|gif)/i.test(m2[1])) return m2[1];
   }
-  // 3) 从 <img> 标签中找看起来像 logo 的图（class/id 含 logo/brand/shop/head，或来自美团 CDN）
-  const imgPatterns = [
-    /<img[^>]+(?:class|id)=["'][^"']*(?:logo|brand|shop|head|avatar|poi)[^"']*["'][^>]+src=["']([^"']+)["']/gi,
-    /<img[^>]+src=["'](https?:\/\/(?:img|p\d|s3)\.meituan\.net[^"']+)["']/gi,
-    /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.dianping\.com[^"']+(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
-    /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.meituan\.com[^"']+(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi
+  // ====== 第二步：<img> 中找店铺图（排除平台 logo）======
+  const shopImgPatterns = [
+    /<img[^>]+(?:class|id)=["'][^"']*(?:shop|poi|store|merchant|biz|restaurant)[^"']*["'][^>]+src=["']([^"'\s]+?)["']/gi,
+    /<img[^>]+src=["'](https?:\/\/(?:p\d|img|ms\d)\.(?:meituan|meishi)\.(net|com)[^"']*(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
+    /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.(?:dpfile|dianping)\.[a-z]+[^"']*(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
   ];
-  for (const p of imgPatterns) {
+  for (const p of shopImgPatterns) {
     p.lastIndex = 0;
-    const m = p.exec(s);
-    if (m && m[1]) return m[1];
+    let found; while ((found = p.exec(s))) { if (found[1] && !isPlatformLogo(found[1])) return found[1]; }
   }
-  // 4) 兜底：取第一个非空、非图标、非追踪的图片（尺寸合理）
-  const anyImg = /<img[^>]+src=["']((?!data:|about:|javascript:|1x1|pixel|beacon|tracker)[^"']+\.(jpg|jpeg|png|webp)(?:\?[^"']*)?)["']/gi;
-  while ((v = anyImg.exec(s))) {
-    const src = v[1];
-    if (!/(spacer|empty|default|placeholder|loading|gray|grey)/i.test(src)) return src;
-  }
+  // ====== 第三步：og:image 作为最后兜底（过滤平台 logo）======
+  let v = extractMeta(s, 'og:image');
+  if (v && !isPlatformLogo(v)) return v;
+  v = extractMeta(s, 'twitter:image');
+  if (v && !isPlatformLogo(v)) return v;
+  // ====== 第四步：任意合理图片 ======
+  const anyImg = /<img[^>]+src=["']((?!data:|about:|javascript:|1x1|pixel|beacon|tracker|spacer|empty|placeholder|loading|gray|grey|logo\.|icon\.)[^"']+\.(jpg|jpeg|png|webp)(?:\?[^"']*)?)["']/gi;
+  while ((v = anyImg.exec(s))) { if (v[1] && !isPlatformLogo(v[1])) return v[1]; }
   return null;
 }
 function extractMeta(s, prop) {
