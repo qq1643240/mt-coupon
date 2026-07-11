@@ -334,13 +334,14 @@ export default {
         const poi = extractPoi(final.url) || extractPoi(final.body);
         if (!poi) {
           const poiNum = extractPoiNum(final.url) || extractPoiNum(final.body);
-          return json({ ok: false, error: '未解析出 poi_id_str', poiNum: poiNum || null, finalUrl: final.url || null }, 422);
+          return json({ ok: false, error: '未解析出 poi_id_str', _debug: { rawInput: target, extractedLink: link, finalUrl: final.url || null }, poiNum: poiNum || null }, 422);
         }
         const h5 = buildClaim(poi, ver);
         const app = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(h5);
-        return json({ ok: true, poi, ver, app, h5 });
+        // 返回调试信息方便排查：rawInput=原始输入, extractedLink=抽取的链接, finalUrl=跟随后的落地URL
+        return json({ ok: true, poi, ver, app, h5, _debug: { rawInput: target.substring(0, 200), extractedLink: link, finalUrl: final.url || null } });
       } catch (e) {
-        return json({ ok: false, error: String((e && e.message) || e) }, 500);
+        return json({ ok: false, error: String((e && e.message) || e), _debug: { rawInput: target.substring(0, 200), extractedLink: link } }, 500);
       }
     }
 
