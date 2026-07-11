@@ -327,6 +327,30 @@ function openDetail(it) {
       <button class="btn btn-primary" id="claimAllBtn" ${it.poi ? '' : 'disabled'}>一键领取本店</button>
     </div>`;
   openModal();
+  // 如果没有缓存头像也没有外链 URL，但有 poi → 自动从后端获取真实店铺头像并缓存
+  if (it.poi && !it.logoData && !it.logo) {
+    fetch('/api/shop?poi=' + encodeURIComponent(it.poi))
+      .then(r => r.json().catch(() => ({})))
+      .then(j => {
+        if (!(j && j.ok)) return;
+        const logoUrl = j.logo;
+        const shopName = j.name;
+        // 更新名称
+        if (shopName && (!it.name || it.name === '该店铺')) {
+          it.name = shopName; save(); render();
+          const hName = document.querySelector('.h-name');
+          if (hName) hName.textContent = esc(shopName);
+        }
+        // 缓存头像
+        if (logoUrl) cacheImage(logoUrl).then(b64 => {
+          it.logoSrc = logoUrl;
+          if (b64) { it.logoData = b64; delete it.logo; }
+          else { it.logo = logoUrl; }
+          save(); render();
+        });
+      })
+      .catch(() => {});
+  }
   if (it.poi) {
     $('#ch1').onclick = () => claim(it, 1);
     $('#ch2').onclick = () => claim(it, 2);

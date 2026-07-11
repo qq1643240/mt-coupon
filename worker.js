@@ -84,15 +84,45 @@ function extractPoiNum(s) {
   const m = String(s || '').match(/[?&]poiId=(\d+)/);
   return m ? m[1] : null;
 }
-// 从美团页面提取 og:image / 店招图，作为店铺头像
+// 从美团页面提取店铺头像（多策略：meta 标签 → JSON 字段 → img 标签）
 function extractLogo(s) {
   if (!s) return null;
+  // 1) 标准 Open Graph meta 标签
   let v = extractMeta(s, 'og:image');
   if (v) return v;
-  const m = s.match(/picUrl["']?\s*:\s*["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i)
-    || s.match(/logoUrl["']?\s*:\s*["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i)
-    || s.match(/headImg["']?\s*:\s*["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i);
-  return m ? m[1] : null;
+  v = extractMeta(s, 'twitter:image');
+  if (v) return v;
+  // 2) JSON 数据中常见的店铺图片字段（覆盖美团/点评各种命名）
+  const jsonFields = [
+    'picUrl', 'logoUrl', 'headImg', 'shopLogo', 'shopLogoUrl',
+    'brandLogo', 'brandLogoUrl', 'avatar', 'photo', 'imageUrl',
+    'logo', 'coverImg', 'frontImg', 'shopIcon', 'poiPic'
+  ];
+  for (const f of jsonFields) {
+    const m = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\']([^"\']+(?:\\.jpg|\\.jpeg|\\.png|\\.webp|\\.gif|\\/)[^"\']*)["\']', 'i'));
+    if (m && m[1]) return m[1];
+    const m2 = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\'](https?://[^"\']+)["\']', 'i'));
+    if (m2 && m2[1] && /\.(jpg|jpeg|png|webp|gif)/i.test(m2[1])) return m2[1];
+  }
+  // 3) 从 <img> 标签中找看起来像 logo 的图（class/id 含 logo/brand/shop/head，或来自美团 CDN）
+  const imgPatterns = [
+    /<img[^>]+(?:class|id)=["'][^"']*(?:logo|brand|shop|head|avatar|poi)[^"']*["'][^>]+src=["']([^"']+)["']/gi,
+    /<img[^>]+src=["'](https?:\/\/(?:img|p\d|s3)\.meituan\.net[^"']+)["']/gi,
+    /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.dianping\.com[^"']+(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
+    /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.meituan\.com[^"']+(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi
+  ];
+  for (const p of imgPatterns) {
+    p.lastIndex = 0;
+    const m = p.exec(s);
+    if (m && m[1]) return m[1];
+  }
+  // 4) 兜底：取第一个非空、非图标、非追踪的图片（尺寸合理）
+  const anyImg = /<img[^>]+src=["']((?!data:|about:|javascript:|1x1|pixel|beacon|tracker)[^"']+\.(jpg|jpeg|png|webp)(?:\?[^"']*)?)["']/gi;
+  while ((v = anyImg.exec(s))) {
+    const src = v[1];
+    if (!/(spacer|empty|default|placeholder|loading|gray|grey)/i.test(src)) return src;
+  }
+  return null;
 }
 function extractMeta(s, prop) {
   if (!s) return null;
@@ -117,6 +147,39 @@ export default {
       return json({ ok: true, poi, v8: buildClaim(poi, 'v8'), v6: buildClaim(poi, 'v6') });
     }
 
+    /* 店铺信息接口：通过 poi_id_str 提取真实店名和头像 */
+    if (path === '/api/shop') {
+      const poi = url.searchParams.get('poi');
+      if (!poi) return json({ ok: false, error: 'missing poi' }, 400);
+      // 尝试多个美团/点评店铺 H5 地址格式
+      const candidates = [
+        'https://h5.waimai.meituan.com/poi/' + poi,
+        'https://www.meituan.com/poi/' + poi,
+        'https://m.dianping.com/appshare/shop/' + poi,
+        'https://waimai.meituan.com/restaurant/' + poi
+      ];
+      const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+      for (const c of candidates) {
+        try {
+          const final = await follow(c, ua, 0);
+          const logo = extractLogo(final.body);
+          let name = null;
+          try {
+            let nv = extractMeta(final.body, 'og:title') || extractMeta(final.body, 'twitter:title');
+            if (!nv) { const tm = final.body.match(/<title>([^<]+)<\/title>/i); nv = tm ? tm[1].trim() : null; }
+            if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券).*$/i, '').replace(/^\s+|\s+$/g, '');
+            if (name) name = name.replace(/\s*[-–|]\s*(在线点餐|配送中|正在营业|已打烊|美团外卖|外卖).*/i, '').trim();
+          } catch (e) {}
+          if (logo || name) {
+            let logoUrl = null;
+            if (logo) try { logoUrl = new URL(logo, final.url).href; } catch (e) {}
+            return json({ ok: true, poi, logo: logoUrl || null, name: name || null });
+          }
+        } catch (e) { continue; }
+      }
+      return json({ ok: true, poi, logo: null, name: null });
+    }
+
     /* 短链/直链解析接口（跟随重定向取出 poi_id_str） */
     if (path === '/resolve') {
       const target = url.searchParams.get('url');
@@ -129,7 +192,16 @@ export default {
         let logo = null;
         try { const lv = extractLogo(final.body); if (lv) logo = new URL(lv, final.url).href; } catch (e) {}
         let name = null;
-        try { const nv = extractMeta(final.body, 'og:title') || extractMeta(final.body, 'title'); if (nv) name = nv.replace(/\s*[-–|]\s*美团.*$/i, '').trim(); } catch (e) {}
+        try {
+          let nv = extractMeta(final.body, 'og:title') || extractMeta(final.body, 'twitter:title');
+          if (!nv) {
+            const tm = final.body.match(/<title>([^<]+)<\/title>/i);
+            nv = tm ? tm[1].trim() : null;
+          }
+          if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券).*$/i, '').replace(/^\s+|\s+$/g, '');
+          // 清理掉"在线点餐"、"配送中"等后缀
+          if (name) name = name.replace(/\s*[-–|]\s*(在线点餐|配送中|正在营业|已打烊|美团外卖|外卖|优惠|团购).*/i, '').trim();
+        } catch (e) {}
         return json({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: final.url || null, logo: logo || null, name: name || null });
       } catch (e) {
         return json({ ok: false, error: String((e && e.message) || e) });

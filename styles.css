@@ -407,7 +407,7 @@ body {
 /* 详情/领券通道 */
 .shop-head { display: flex; align-items: center; gap: 14px; }
 .shop-head .logo-box, .shop-head .logo-img { width: 58px; height: 58px; font-size: 26px; border-radius: 16px; }
-.shop-head .h-name { font-size: 18px; font-weight: 750; }
+.shop-head .h-name { font-size: 18px; font-weight: 750; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; word-break: break-word; }
 .shop-head .h-sub { font-size: 12.5px; color: var(--muted); margin-top: 5px; display: flex; align-items: center; gap: 6px; }
 .channel {
   border: 1px solid var(--glass-border); border-radius: 15px; padding: 13px 14px;
