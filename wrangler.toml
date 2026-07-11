@@ -1,4 +1,4 @@
-name = "mt-coupon"
+name = "mt"
 compatibility_date = "2025-01-01"
 main = "worker.js"
 
