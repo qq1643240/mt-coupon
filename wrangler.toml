@@ -1,6 +1,8 @@
 name = "mt"
 compatibility_date = "2025-01-01"
 main = "worker.js"
+workers_dev = true
+preview_urls = true
 
 # 静态资源（index.html / app.js / styles.css）由 Worker 的 assets 托管
 [assets]

@@ -4,5 +4,9 @@ worker.js
 server.js
 README.md
 .gitignore
+start.bat
 node_modules
 functions
+# 仓库元数据与临时产物
+.git
+.wrangler
