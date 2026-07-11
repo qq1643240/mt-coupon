@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.33'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.34'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -274,8 +274,10 @@ function render() {
         <div class="card-pin">${it.pinned ? ICON.pin : ''}</div>
       </div>
       ${it.poi ? `<div class="card-addr" data-addr="${it.id}" title="点击复制领取地址"><span class="ca-label">领取地址 · ${esc(v8.length > 40 ? v8.slice(0, 40) + '…' : v8)}</span><span class="copy">${ICON.copy}</span></div>` : ''}
-      ${it.note ? '<div class="card-tags"><span class="note-pill">' + esc(it.note) + '</span></div>' : ''}
-      ${(it.tags && it.tags.length) ? '<div class="card-tags">' + it.tags.map(t => `<span class="tag-pill" data-tag="${escAttr(t)}">${esc(t)}</span>`).join('') + '</div>' : ''}
+      ${((it.note || '') || (it.tags && it.tags.length)) ? '<div class="card-tags">'
+        + (it.note ? '<span class="note-pill">' + esc(it.note) + '</span>' : '')
+        + (it.tags && it.tags.length ? it.tags.map(t => `<span class="tag-pill" data-tag="${escAttr(t)}">${esc(t)}</span>`).join('') : '')
+        + '</div>' : ''}
       <div class="card-actions">
         <div class="act-row">
           ${it.poi
