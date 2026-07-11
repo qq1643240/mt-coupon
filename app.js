@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.31'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.32'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -55,12 +55,13 @@ function ts(y, mo, d, h, mi, s) { return new Date(y, mo - 1, d, h, mi, s).getTim
 
 /* 种子数据（首次打开无本地数据时） */
 const seed = [
-  { id: '395505', name: '旺角大排档（粤菜小炒、啫啫煲）', poi: '7FATrlwYZgjK0Wo13H0zOAI', amount: '', logo: '', note: '', pinned: true,  claimed: false, updatedAt: ts(2026, 7, 11, 11, 17, 26) },
-  { id: '395165', name: '川味轩（南新五路店）',           poi: 'e1G07VLcvSyapClYCnYeYQI', amount: '', logo: '', note: '', pinned: false, claimed: false, updatedAt: ts(2026, 7, 11, 10, 54, 45) }
+  { id: '395505', name: '旺角大排档（粤菜小炒、啫啫煲）', poi: '7FATrlwYZgjK0Wo13H0zOAI', amount: '', logo: '', note: '', tags: [], pinned: true,  claimed: false, updatedAt: ts(2026, 7, 11, 11, 17, 26) },
+  { id: '395165', name: '川味轩（南新五路店）',           poi: 'e1G07VLcvSyapClYCnYeYQI', amount: '', logo: '', note: '', tags: [], pinned: false, claimed: false, updatedAt: ts(2026, 7, 11, 10, 54, 45) }
 ];
 
 let data = load();
 let curSeg = 'all';
+let curTag = null; // 当前选中标签，null = 显示全部
 function load() {
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
   return seed.slice();
@@ -129,6 +130,17 @@ function extractUrl(text) {
   }
   if (!url) return null;
   return url.replace(/[。，、）)】」』"'.,;:!?\s]+$/, '');
+}
+// 从任意文本提取所有 http(s) 链接（用于批量识别）
+function extractAllUrls(text) {
+  const s = String(text || '');
+  const safe = /[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+/;
+  const re = new RegExp('https?://' + safe.source, 'gi');
+  const urls = [];
+  let m;
+  while ((m = re.exec(s))) { urls.push(m[0].replace(/[。，、）)】」』"'.,;:!?\s]+$/, '')); }
+  // 去重
+  return [...new Set(urls)];
 }
 // 从分享文字智能提取店名（优先 「」 【】 「」 "" 包裹；允许内含中文括号（））
 function extractName(text) {
@@ -202,6 +214,24 @@ function fmtTime(ts) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+/* ---------- 标签栏渲染 ---------- */
+function renderTagBar(allTags) {
+  const bar = $('#tagBar');
+  if (!bar) return;
+  // 没有标签且没选中任何标签 → 隐藏
+  if (allTags.length === 0 && !curTag) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  bar.innerHTML = ''
+    + '<button class="tag-btn' + (!curTag ? ' active' : '') + '" data-tag="">全部</button>'
+    + allTags.map(t => '<button class="tag-btn' + (curTag === t ? ' active' : '') + '" data-tag="' + escAttr(t) + '">' + esc(t) + '</button>').join('');
+  bar.querySelectorAll('.tag-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      curTag = btn.dataset.tag || null;
+      render();
+    });
+  });
+}
+
 /* ---------- 渲染 ---------- */
 function render() {
   const q = ($('#search').value || '').trim().toLowerCase();
@@ -210,14 +240,22 @@ function render() {
   );
   if (curSeg === 'todo') list_data = list_data.filter(i => !i.claimed);
   else if (curSeg === 'done') list_data = list_data.filter(i => i.claimed);
+  // 标签筛选
+  if (curTag) list_data = list_data.filter(i => (i.tags || []).includes(curTag));
 
   list_data.sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+
+  // 收集所有标签（用于标签栏显示）
+  const allTags = [...new Set(data.flatMap(it => it.tags || []))].sort();
 
   const list = $('#list'); list.innerHTML = '';
   $('#statCount').textContent = `共 ${data.length} 个`;
   $('#statPinned').textContent = `置顶 ${data.filter(i => i.pinned).length}`;
   updateStatbar();
   $('#empty').classList.toggle('hidden', list_data.length > 0);
+
+  // 渲染标签栏
+  renderTagBar(allTags);
 
   list_data.forEach((it, idx) => {
     const card = document.createElement('div');
@@ -237,6 +275,7 @@ function render() {
       </div>
       ${it.poi ? `<div class="card-addr" data-addr="${it.id}" title="点击复制领取地址"><span class="ca-label">领取地址 · ${esc(v8.length > 40 ? v8.slice(0, 40) + '…' : v8)}</span><span class="copy">${ICON.copy}</span></div>` : ''}
       ${it.note ? `<div class="card-note">${esc(it.note)}</div>` : ''}
+      ${(it.tags && it.tags.length) ? '<div class="card-tags">' + it.tags.map(t => `<span class="tag-pill" data-tag="${escAttr(t)}">${esc(t)}</span>`).join('') + '</div>' : ''}
       <div class="card-actions">
         <div class="act-row">
           ${it.poi
@@ -266,6 +305,15 @@ $('#list').addEventListener('click', e => {
         setTimeout(() => { addrEl.classList.remove('copied'); if (c) c.innerHTML = ICON.copy; }, 1200);
       }, () => toast('复制失败'));
     }
+    return;
+  }
+  // 标签点击 → 筛选该标签
+  const tagEl = e.target.closest('.tag-pill');
+  if (tagEl) {
+    const tag = tagEl.dataset.tag;
+    curTag = (curTag === tag) ? null : tag; // 再次点击取消筛选
+    render();
+    toast(curTag ? '筛选标签：' + curTag : '已清除标签筛选');
     return;
   }
   const btn = e.target.closest('[data-act]');
@@ -298,7 +346,8 @@ function claim(it, which) {
 $('#addBtn').addEventListener('click', () => openEditor(null));
 function openEditor(it) {
   const editing = !!it;
-  const item = it || { id: uid(), name: '', poi: '', amount: '', logo: '', note: '', pinned: false, claimed: false, updatedAt: Date.now() };
+  const item = it || { id: uid(), name: '', poi: '', amount: '', logo: '', note: '', tags: [], pinned: false, claimed: false, updatedAt: Date.now() };
+  const tagsStr = (item.tags || []).join('，');
   $('#modalTitle').textContent = editing ? '编辑收藏' : '新增收藏';
   $('#modalBody').innerHTML = `
     <div class="field"><label>店铺名称</label><input id="f_name" value="${esc(item.name)}" placeholder="例如：木桶饭湘菜馆（南海店）"></div>
@@ -313,6 +362,7 @@ function openEditor(it) {
       </div>
     </div>
     <div class="field"><label>poi_id_str（商家ID）</label><input id="f_poi" value="${esc(item.poi)}" placeholder="例如：7FATrlwYZgjK0Wo13H0zOAI"></div>
+    <div class="field"><label>标签（选填，逗号分隔多标签）</label><input id="f_tags" value="${esc(tagsStr)}" placeholder="例如：早餐,夜宵,奶茶"></div>
     <div class="field"><label>备注</label><textarea id="f_note" rows="2" placeholder="选填，例如：周三可用 / 满20减3">${esc(item.note)}</textarea></div>
     <div class="modal-foot">
       ${editing ? '<button class="btn btn-danger" id="delBtn">删除</button>' : ''}
@@ -327,6 +377,9 @@ function openEditor(it) {
     item.amount = $('#f_amount').value.trim();
     item.poi = $('#f_poi').value.trim();
     item.note = $('#f_note').value.trim();
+    // 解析标签（支持中英文逗号分隔）
+    const rawTags = ($('#f_tags') && $('#f_tags').value) || '';
+    item.tags = rawTags.split(/[,，]/).map(t => t.trim()).filter(t => t.length > 0);
     item.pinned = $('#f_pinned').value === '1';
     item.updatedAt = Date.now();
     if (!editing) data.push(item);
@@ -477,7 +530,7 @@ function autoSave(poi, opts) {
     it.updatedAt = Date.now();
     if (opts.name && (!it.name || it.name === '该店铺')) it.name = opts.name;
   } else {
-    it = { id: uid(), name: opts.name || '该店铺', poi, amount: '', logo: '', note: '', pinned: false, claimed: false, updatedAt: Date.now() };
+    it = { id: uid(), name: opts.name || '该店铺', poi, amount: '', logo: '', note: '', tags: [], pinned: false, claimed: false, updatedAt: Date.now() };
     data.push(it);
   }
   save(); render();
@@ -498,6 +551,33 @@ function setSearching(on) {
   $('#search').style.opacity = on ? '.6' : '1';
 }
 async function handleLinkSearch(v) {
+  // 检测是否包含多条链接 → 批量识别
+  const allUrls = extractAllUrls(v);
+  if (allUrls.length > 1) {
+    const ok = confirm(`检测到 ${allUrls.length} 个商家链接，是否全部识别并添加到收藏？`);
+    if (!ok) { setSearching(false); return; }
+    setSearching(true);
+    let added = 0;
+    for (const u of allUrls) {
+      try {
+        let poi = extractPoi(u);
+        let info = null;
+        if (!poi) info = await resolveLink(u);
+        const resolved = poi || (info && info.poi);
+        if (resolved) {
+          const name = extractName(v) || (info && info.name) || ('商家' + (added + 1));
+          autoSave(resolved, { name: name + (added > 0 ? ` (${added+1})` : ''), logo: (info && info.logo) || null });
+          added++;
+        }
+      } catch (e) { /* 单条失败继续下一条 */ }
+    }
+    setSearching(false);
+    if (added > 0) toast('批量识别完成：' + added + ' 家店铺已添加');
+    else toast('未能识别出任何有效店铺');
+    return;
+  }
+
+  // 单条链接：原有逻辑
   const url = extractUrl(v) || v;
   setSearching(true);
   try {
@@ -635,7 +715,7 @@ function showApiDocs() {
     { p: '?poi=<poi>', d: '打开本机已收藏的该商家详情（需本机先识别收藏过）。' },
     { p: '/api/shop?poi=<poi>', d: '返回该商家真实店名与头像，JSON：{ok,logo,name}，供详情页实时刷新头像用。' },
     { p: '/api/claim?poi=<poi>', d: '返回该商家 v8 / v6 领券链接，JSON：{ok,poi,v8,v6}。' },
-    { p: '/api/deeplink?ver=v8&url=<分享链接>', d: '【接口版·跳 App】输入美团分享链接/整段话术，解析 poi 后返回可唤起美团 App 的深链，JSON：{ok,poi,ver,app,h5}。快捷指令取 app 字段用「打开 URL」即唤起 App。ver=v8 主券 / v6 第二张。' },
+    { p: '/api/deeplink?ver=v8&url=<分享链接>', d: '【接口版·跳 App】输入美团分享链接/整段话术，解析 poi 后返回深链 JSON：{ok,poi,ver,app,h5}。加 &format=page 则直接返回中转页 HTML（由页面内 JS 唤起 App），快捷指令「打开 URL」一步到位。ver=v8 主券 / v6 第二张。' },
     { p: '/resolve?url=<链接>', d: '服务端跟随跳转解析任意美团短链/分享链接，返回 poi、店名、头像等 JSON。' }
   ];
   $('#modalTitle').textContent = 'API 调用说明';

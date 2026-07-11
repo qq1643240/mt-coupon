@@ -312,20 +312,29 @@ export default {
     }
 
     /* 深链接口：输入分享链接/整段话术 → 解析 poi → 返回可唤起美团 App 的 imeituan:// 深链（JSON）
-       供快捷指令调用：「获取 URL 内容」/api/deeplink?ver=v8&url=<剪贴板> → 取 app 字段 →「打开 URL」唤起 App
-       例：/api/deeplink?ver=v8&url=http://dpurl.cn/xxxx
-       返回：{ ok, poi, ver, app: "imeituan://...", h5: "https://offsiteact..." } */
+       用法 A（JSON）：/api/deeplink?ver=v8&url=http://dpurl.cn/xxxx
+         返回 JSON：{ ok, poi, ver, app, h5, _debug } — 适合网页 JS 调用
+       用法 B（中转页）：/api/deeplink?ver=v8&format=page&url=http://dpurl.cn/xxxx
+         直接返回中转页 HTML（由页面内 JS 触发 scheme 唤起 App）— 适合快捷指令「打开 URL」一步到位 */
     if (path === '/api/deeplink') {
       const target = url.searchParams.get('url');
       if (!target) return json({ ok: false, error: 'missing url' }, 400);
       let ver = url.searchParams.get('ver') || 'v8';
       const vm = String(ver).match(/^v?([68])$/);
       ver = vm ? 'v' + vm[1] : 'v8';
+      const format = url.searchParams.get('format'); // 'page' = 返回中转页 HTML，其他/缺省 = 返回 JSON
       // 从整段文本抽第一个 http(s) 链接（兼容直接传整段分享话术）
       const linkMatch = String(target).match(/https?:\/\/[^\s"'<>）)\]]+/);
       const link = linkMatch ? linkMatch[0] : target;
       // 提前校验：如果没抽到链接（纯文本/口令等），直接友好报错，避免后续 new URL() 炸 catch
       if (!linkMatch || !/^https?:\/\//i.test(link)) {
+        if (format === 'page') {
+          return new Response('<!doctype html><html><head><meta charset=utf-8><title>错误</title></head>'
+            + '<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;color:#c00;background:#fff">'
+            + '<div style="text-align:center;padding:24px"><h2 style="margin:0 0 12px">未检测到有效链接</h2>'
+            + '<p style="color:#666;margin:0">请复制含 dpurl.cn / meituan.com 链接的分享内容后重试</p></div></body></html>',
+            { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        }
         return json({ ok: false, error: '剪贴板内容未包含有效链接，请复制含 dpurl.cn / meituan.com 链接的分享内容后重试。' }, 400);
       }
       const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
@@ -334,16 +343,37 @@ export default {
         const poi = extractPoi(final.url) || extractPoi(final.body);
         if (!poi) {
           const poiNum = extractPoiNum(final.url) || extractPoiNum(final.body);
+          if (format === 'page') {
+            return new Response('<!doctype html><html><head><meta charset=utf-8><title>解析失败</title></head>'
+              + '<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;color:#c00;background:#fff">'
+              + '<div style="text-align:center;padding:24px"><h2 style="margin:0 0 12px">无法解析店铺</h2>'
+              + '<p style="color:#666;margin:0">该链接不含 poi_id_str，无法生成领券入口</p></div></body></html>',
+              { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+          }
           return json({ ok: false, error: '未解析出 poi_id_str', _debug: { rawInput: target, extractedLink: link, finalUrl: final.url || null }, poiNum: poiNum || null }, 422);
         }
         const h5 = buildClaim(poi, ver);
         const app = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(h5);
-        // 返回调试信息方便排查：rawInput=原始输入, extractedLink=抽取的链接, finalUrl=跟随后的落地URL
+        // format=page → 返回中转页 HTML（由页面内 JS 触发 scheme 唤起 App，iOS Safari 可靠放行）
+        if (format === 'page') {
+          return appJumpPage(app, h5);
+        }
+        // 默认返回 JSON
         return json({ ok: true, poi, ver, app, h5, _debug: { rawInput: target.substring(0, 200), extractedLink: link, finalUrl: final.url || null } });
       } catch (e) {
+        if (format === 'page') {
+          return new Response('<!doctype html><html><head><meta charset=utf-8><title>错误</title></head>'
+            + '<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;color:#c00;background:#fff">'
+            + '<div style="text-align:center;padding:24px"><h2 style="margin:0 0 12px">请求失败</h2>'
+            + '<p style="color:#666;margin:0">' + escHtml(String((e && e.message) || e)) + '</p></div></body></html>',
+            { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        }
         return json({ ok: false, error: String((e && e.message) || e), _debug: { rawInput: target.substring(0, 200), extractedLink: link } }, 500);
       }
     }
+
+    /* 辅助：HTML 转义 */
+    function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
     /* 店铺信息接口：通过 poi_id_str 提取真实店名和头像 */
     if (path === '/api/shop') {
