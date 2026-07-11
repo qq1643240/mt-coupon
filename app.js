@@ -1,5 +1,5 @@
 /* =========================================================
-   美团券夹 · 极简收藏（移动端工具站风格）
+   美团津贴 · 极简收藏（移动端工具站风格）
    - 本地存储（localStorage）：搜索/领取自动保存
    - 粘贴店铺链接自动识别 poi_id_str → 自动收藏
    - 店名从分享文字智能提取；logo 用首字色块（支持自定义图）
@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.21'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.22'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -512,7 +512,7 @@ async function handleLinkSearch(v) {
     else if (info && info.error) toast('服务连接失败，请确认已部署 / 启动服务');
     else if (info && info.poiNum) toast(`该链接只有数字店铺ID(${info.poiNum})，不含 poi_id_str，无法直接领券`);
     else if (info && info.finalUrl) toast('已跟随跳转，但链接里没有 poi_id_str，请确认是「美团店铺分享」链接');
-    else toast('未能解析出店铺，请粘贴美团分享链接（含 poi_id_str）');
+    else toast('未能解析出店铺，请粘贴美团链接（含 poi_id_str）');
   } finally {
     setSearching(false);
   }
@@ -635,7 +635,7 @@ document.addEventListener('keydown', e => {
 
 /* ---------- 深度链接（iOS 快捷指令 / 外部跳转） ----------
    用法：
-   ?url=<美团分享链接>      自动识别并打开店铺详情
+   ?url=<美团链接>      自动识别并打开店铺详情
    ?claim=<poi>&v=8|6       直接打开对应领券链接（跳转美团 App/H5）
    ?open=<任意url>          直接打开该链接
    ?poi=<poi>               打开本机已收藏的该商家详情

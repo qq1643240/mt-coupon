@@ -302,8 +302,6 @@ body {
 .card-actions .btn .ic { width: 14px; height: 14px; }
 .btn .bi { display: inline-flex; align-items: center; justify-content: center; }
 .btn .bi .ic { width: 14px; height: 14px; }
-.claimed-tag { color: #1aa260; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
-.claimed-tag .ic { width: 13px; height: 13px; }
 
 /* ---------- 按钮（跟随主题变量） ---------- */
 .btn {
