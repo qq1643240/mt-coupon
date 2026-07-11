@@ -316,7 +316,16 @@ function openDetail(it) {
 
 /* ---------- 弹窗 ---------- */
 function openModal() { $('#modal').classList.remove('hidden'); }
-function closeModal() { $('#modal').classList.add('hidden'); }
+function closeModal() {
+  $('#modal').classList.add('hidden');
+  // 关闭详情弹窗时自动清空搜索框（搜索链接识别后打开的详情）
+  const searchEl = $('#search');
+  if (searchEl && searchEl.value) {
+    searchEl.value = '';
+    toggleSearchClear();
+    render();
+  }
+}
 $('#modal').addEventListener('click', e => { if (e.target.closest('[data-close]')) closeModal(); });
 
 /* ---------- 分段筛选 ---------- */
