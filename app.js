@@ -138,13 +138,16 @@ function extractName(text) {
   if (m) return m[1].trim();
   return '';
 }
-// logo 用黑白首字色块（CSS 变量 --logo-bg / --logo-ink），支持自定义图
-// 优先用已缓存到本机的 base64（it.logoData），其次外链 URL，最后首字色块
+// 美团黄色平台 logo（拿不到真实商家头像时的降级兜底）
+const MEITUAN_FALLBACK_LOGO = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#FFD100"/><text x="50" y="68" text-anchor="middle" font-size="42" font-weight="bold" fill="#333">美团</text></svg>');
+
+// logo 优先级：base64缓存 → 外链URL → 美团黄色降级logo → 首字色块（最后兜底）
 function logoHtml(it) {
   const ch = (it.name || '?').trim().charAt(0) || '?';
   const src = it.logoData || it.logo;
-  if (src) return `<img class="logo-img" src="${esc(src)}" alt="">`;
-  return `<div class="logo-box">${esc(ch)}</div>`;
+  if (src) return `<img class="logo-img" src="${esc(src)}" alt="" onerror="this.src='${MEITUAN_FALLBACK_LOGO}'">`;
+  // 没有任何logo资源 → 用美团黄色logo降级（不再用首字色块）
+  return `<img class="logo-img" src="${MEITUAN_FALLBACK_LOGO}" alt="">`;
 }
 // 把头像图片下载转 base64 缓存进本机（离线/换网络也能显示）。
 // 跨域或过大（>3MB）则失败，降级为外链 URL（仍由浏览器 HTTP 缓存兜底）。
@@ -161,6 +164,14 @@ function cacheImage(url) {
       }).catch(() => resolve(null));
     } catch (e) { resolve(null); }
   });
+}
+
+/* 格式化领取时间：YYYY-MM-DD HH:mm:ss */
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /* ---------- 渲染 ---------- */
@@ -190,8 +201,9 @@ function render() {
       <div class="card-top">
         ${logoHtml(it)}
         <div class="shop-meta">
-          <div class="card-name">${esc(it.name)}</div>
+          <div class="card-name" title="${esc(it.name)}">${esc(it.name)}</div>
           <div class="card-sub"><span>${esc(it.amount || '')}</span>${it.claimed ? '<span class="claimed-tag">' + ICON.check + '已领取</span>' : ''}</div>
+          ${it.updatedAt ? `<div class="card-time">最新领取：${fmtTime(it.updatedAt)}</div>` : ''}
         </div>
         <div class="card-pin">${it.pinned ? ICON.pin : ''}</div>
       </div>
@@ -327,7 +339,36 @@ function openDetail(it) {
       <button class="btn btn-primary" id="claimAllBtn" ${it.poi ? '' : 'disabled'}>一键领取本店</button>
     </div>`;
   openModal();
-  // 如果没有缓存头像也没有外链 URL，但有 poi → 自动从后端获取真实店铺头像并缓存
+  // ====== 商家券实时更新：每次打开详情都查询后端最新数据 ======
+  if (it.poi) {
+    fetch('/api/shop?poi=' + encodeURIComponent(it.poi))
+      .then(r => r.json().catch(() => ({})))
+      .then(j => {
+        if (!(j && j.ok)) return;
+        const logoUrl = j.logo;
+        const shopName = j.name;
+        let changed = false;
+        // 更新名称（如果后端返回了更完整的名字）
+        if (shopName && shopName !== it.name && it.name !== '该店铺') {
+          it.name = shopName; changed = true;
+          const hName = document.querySelector('.h-name');
+          if (hName) hName.textContent = esc(shopName);
+        }
+        // 更新/缓存头像
+        if (logoUrl && logoUrl !== it.logoSrc) {
+          cacheImage(logoUrl).then(b64 => {
+            it.logoSrc = logoUrl;
+            if (b64) { it.logoData = b64; delete it.logo; }
+            else { it.logo = logoUrl; delete it.logoData; }
+            save(); render();
+          });
+          changed = true;
+        }
+        if (changed) save();
+      })
+      .catch(() => {});
+  }
+  // 如果完全没有头像资源（旧数据），也尝试获取
   if (it.poi && !it.logoData && !it.logo) {
     fetch('/api/shop?poi=' + encodeURIComponent(it.poi))
       .then(r => r.json().catch(() => ({})))
