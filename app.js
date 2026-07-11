@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.23'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.24'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -626,8 +626,9 @@ document.querySelectorAll('[data-palette-close]').forEach(el => el.addEventListe
 function showApiDocs() {
   const base = location.origin;
   const rows = [
+    { p: '?jk=v8=<美团分享链接>', d: '【一键跳 App 领券】把整段分享话术（或带 poi 的链接）直接贴进来，服务端自动解析 poi_id_str 后 302 跳转到美团 App 领券页。v8 主券 / v6 第二张，无需打开本站页面，最适合做 iOS 快捷指令。' },
+    { p: '?claim=<poi>&v=8', d: '【跳 App 领券】已知 poi_id_str 时直接跳转美团 App/H5 领取（v8 主券，v=6 为第二张）。' },
     { p: '?url=<美团分享链接>', d: '自动识别店铺 poi_id_str 并打开详情（识别即收藏）。iOS 快捷指令最常用：复制链接后用「打开 URL」跳到这里即可。' },
-    { p: '?claim=<poi>&v=8', d: '直接跳转美团 App/H5 领取主券（v8）。把 v=8 改成 v=6 即领取第二张。' },
     { p: '?open=<任意网址>', d: '中转直接打开任意网址（用于需要统一入口的场景）。' },
     { p: '?poi=<poi>', d: '打开本机已收藏的该商家详情（需本机先识别收藏过）。' },
     { p: '/api/shop?poi=<poi>', d: '返回该商家真实店名与头像，JSON：{ok,logo,name}，供详情页实时刷新头像用。' },
@@ -671,6 +672,7 @@ document.addEventListener('keydown', e => {
 
 /* ---------- 深度链接（iOS 快捷指令 / 外部跳转） ----------
    用法：
+   ?jk=v8|v6=<美团分享链接/整段话术>   自动解析 poi 并 302 跳美团 App 领券页（最快路径）
    ?url=<美团链接>      自动识别并打开店铺详情
    ?claim=<poi>&v=8|6       直接打开对应领券链接（跳转美团 App/H5）
    ?open=<任意url>          直接打开该链接
@@ -680,10 +682,35 @@ function handleDeepLink() {
   const p = new URLSearchParams(location.search);
   const url = p.get('url');
   const claim = p.get('claim');
+  const jk = p.get('jk');
   const openUrl = p.get('open');
   const poi = p.get('poi');
 
   if (openUrl) { window.location.href = openUrl; return; }
+
+  /* ?jk=v8=<分享话术/链接>：客户端兜底解析 poi 并跳转到美团领券页（worker 301 未生效时生效） */
+  if (jk) {
+    const raw = decodeURIComponent(jk);
+    let ver = 'v8', text = raw;
+    const mm = raw.match(/^v?([68])=/);
+    if (mm) { ver = 'v' + mm[1]; text = raw.slice(mm[0].length); }
+    const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
+    if (um) {
+      toast('正在解析店铺…');
+      fetch('/resolve?url=' + encodeURIComponent(um[0]))
+        .then(r => r.json()).then(info => {
+          if (info && info.poi) { window.location.href = (ver === 'v6' ? urlV6(info.poi) : urlV8(info.poi)); }
+          else toast('解析失败，请确认是美团店铺分享链接');
+        }).catch(() => toast('解析请求失败'));
+      return;
+    }
+    if (text && text.includes('poi_id_str=')) {
+      const pm = text.match(/poi_id_str=([^&\s"'<>\\]+)/);
+      if (pm) { window.location.href = (ver === 'v6' ? urlV6(pm[1]) : urlV8(pm[1])); return; }
+    }
+    toast('未能从分享内容解析出店铺链接');
+    return;
+  }
 
   if (claim) {
     const v = (p.get('v') === '6') ? 6 : 8;

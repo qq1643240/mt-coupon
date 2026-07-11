@@ -143,6 +143,40 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    /* 一键领券跳转：?jk=v8=<美团分享链接/整段分享话术> → 自动解析 poi 并 302 跳转到美团 App 领券页
+       例：?jk=v8=我最近很喜欢美团外卖的「肯德基宅急送（南海大道北店）」… http://dpurl.cn/MRSvOKiz */
+    if (url.searchParams.has('jk')) {
+      const raw = decodeURIComponent(url.searchParams.get('jk') || '');
+      let ver = 'v8', text = raw;
+      const m = raw.match(/^v?([68])=/);
+      if (m) { ver = 'v' + m[1]; text = raw.slice(m[0].length); }
+      // 1) 分享文字里直接带 poi_id_str
+      let poi = extractPoi(text);
+      // 2) 否则从文字里提取链接，跟随跳转解析出 poi
+      if (!poi) {
+        const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
+        if (um) {
+          const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+          try {
+            const final = await follow(um[0], ua, 0);
+            poi = extractPoi(final.url) || extractPoi(final.body);
+            if (!poi) {
+              const sm = final.body && (final.body.match(/["']poiIdStr["']\s*:\s*["']([^"']+)["']/) || final.body.match(/shopId["']?\s*[:=]\s*["']?(\d+)/));
+              if (sm) poi = sm[1];
+            }
+          } catch (e) {}
+        }
+      }
+      if (poi) return Response.redirect(buildClaim(poi, ver), 302);
+      return new Response(
+        '<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>解析失败</title>' +
+        '<style>body{font-family:system-ui,' + "'PingFang SC','Microsoft YaHei',sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.box{text-align:center;padding:24px;max-width:340px;line-height:1.7}.e{color:#ff6b6b;font-size:16px;margin-bottom:10px}.s{color:#aaa;font-size:13px}</style>' +
+        '</head><body><div class="box"><div class="e">⚠️ 未能从分享内容中解析出店铺</div>' +
+        '<div class="s">请确认粘贴的是「美团外卖店铺分享」链接（含 poi_id_str），或带可跳转的店铺短链。</div></div></body></html>',
+        { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+      );
+    }
+
     /* 领券链接生成接口（供脚本 / 快捷指令快速调用） */
     if (path === '/api/claim') {
       const poi = url.searchParams.get('poi');
