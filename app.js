@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.22'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.23'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -129,14 +129,17 @@ function extractUrl(text) {
   if (!url) return null;
   return url.replace(/[。，、）)】」』"'.,;:!?\s]+$/, '');
 }
-// 从分享文字智能提取店名（优先 「」 （） "" 内，其次链接前的店铺词）
+// 从分享文字智能提取店名（优先 「」 【】 「」 "" 包裹；允许内含中文括号（））
 function extractName(text) {
+  const clean = n => (n || '').replace(/\s*(?:快来领券|领券|领取|优惠券|团购|满减|立减|秒杀).*$/i, '').replace(/^\s+|\s+$/g, '');
   const s = String(text || '');
-  let m = s.match(/[「【（("']([^」】）)"']{1,30})[」】）)"']/);
-  if (m) return m[1].trim();
+  // 外层书名号/方括号/引号内的完整店名（不把中文括号（）当分隔符，避免「旺角大排档（粤菜小炒）」被截断）
+  let m = s.match(/[「【『“"']([\s\S]*?)[\]」】』”"']/);
+  if (m && clean(m[1])) return clean(m[1]);
+  // 退而求其次：匹配「店/馆/楼/铺/坊/档/餐厅…」等词及其前后文（含中文括号）
   const before = s.split(/https?:\/\//)[0];
-  m = before.match(/([\u4e00-\u9fa5A-Za-z0-9（）()·\-\s]{2,20}?(?:店|馆|楼|铺|坊|餐厅|美食|小吃)[^，。,\s]{0,12})/);
-  if (m) return m[1].trim();
+  m = before.match(/([\u4e00-\u9fa5A-Za-z0-9（）()·\-·\s]{2,30}?(?:店|馆|楼|铺|坊|档|餐厅|美食|小吃|超市|便利店)[^，。,\n]{0,16})/);
+  if (m && clean(m[1])) return clean(m[1]);
   return '';
 }
 // 判断店铺名是否有效（过滤纯平台名/无意义名称）
@@ -579,6 +582,7 @@ const COMMANDS = [
   { icon: ICON.plus, label: '新增收藏', desc: '添加新商家券', keys: 'N', run: () => openEditor(null) },
   { icon: ICON.bolt, label: '批量领取全部券', desc: '打开全部收藏 v8+v6', keys: 'B', run: batchClaimAll },
   { icon: ICON.moon, label: '切换深色模式', desc: '浅色/深色', keys: 'T', run: toggleTheme },
+  { icon: ICON.open, label: 'API 调用说明', desc: '接口地址与用途', run: showApiDocs },
   { icon: ICON.save, label: '导出数据', desc: '下载 JSON 备份', run: exportData },
   { icon: ICON.import, label: '导入数据', desc: '从 JSON 恢复', run: importData },
   { icon: ICON.trashAll, label: '清空全部', desc: '删除所有收藏', run: clearAll }
@@ -617,6 +621,38 @@ paletteInput.addEventListener('keydown', e => {
   else if (e.key === 'Escape') closePalette();
 });
 document.querySelectorAll('[data-palette-close]').forEach(el => el.addEventListener('click', closePalette));
+
+/* ---------- API 调用说明（菜单内查看接口与用途） ---------- */
+function showApiDocs() {
+  const base = location.origin;
+  const rows = [
+    { p: '?url=<美团分享链接>', d: '自动识别店铺 poi_id_str 并打开详情（识别即收藏）。iOS 快捷指令最常用：复制链接后用「打开 URL」跳到这里即可。' },
+    { p: '?claim=<poi>&v=8', d: '直接跳转美团 App/H5 领取主券（v8）。把 v=8 改成 v=6 即领取第二张。' },
+    { p: '?open=<任意网址>', d: '中转直接打开任意网址（用于需要统一入口的场景）。' },
+    { p: '?poi=<poi>', d: '打开本机已收藏的该商家详情（需本机先识别收藏过）。' },
+    { p: '/api/shop?poi=<poi>', d: '返回该商家真实店名与头像，JSON：{ok,logo,name}，供详情页实时刷新头像用。' },
+    { p: '/api/claim?poi=<poi>', d: '返回该商家 v8 / v6 领券链接，JSON：{ok,poi,v8,v6}。' },
+    { p: '/resolve?url=<链接>', d: '服务端跟随跳转解析任意美团短链/分享链接，返回 poi、店名、头像等 JSON。' }
+  ];
+  $('#modalTitle').textContent = 'API 调用说明';
+  $('#modalBody').innerHTML = `
+    <p class="api-base">接口域名：<code>${esc(base)}</code></p>
+    <p class="api-tip">把下面路径拼到域名后即可调用，例如：<br><code>${esc(base + '/?url=https://waimai.meituan.com/...')}</code></p>
+    <div class="api-list">
+      ${rows.map(r => `
+        <div class="api-item">
+          <div class="api-row"><code>${esc(r.p)}</code><button class="btn btn-sm copy-api" data-copy="${esc(base + '/' + r.p.replace(/^\/+/, ''))}">复制</button></div>
+          <div class="api-desc">${esc(r.d)}</div>
+        </div>`).join('')}
+    </div>`;
+  openModal();
+  $('#modalBody').querySelectorAll('.copy-api').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const txt = btn.dataset.copy;
+      navigator.clipboard?.writeText(txt).then(() => toast('已复制接口地址'), () => toast('复制失败'));
+    });
+  });
+}
 
 /* ---------- 全局快捷键 ---------- */
 document.addEventListener('keydown', e => {
