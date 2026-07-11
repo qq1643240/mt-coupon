@@ -248,21 +248,14 @@ export default {
         return Response.redirect(foundPoi.slice(13), 302);
       }
 
-      // ② 拿到了 poi_id_str → 构造美团 App Deep Link 并 302 直跳
+      // ② 拿到了 poi_id_str → 构造领券页 URL → 用 imeituan:// scheme 包装后 302 直跳 App
       if (foundPoi) {
         const poi = foundPoi;
-        const deepLinks = [
-          // 格式1: meituanwaimai:// 打开外卖商家页（最可能触发津贴）
-          'meituanwaimai://webapp/shop?poi_id_str=' + poi,
-          // 格式2: imeituan:// 打开通用店铺详情
-          'imeituan://www.meituan.com/web/poiDetail?poiid=' + poi + '&source_type=external',
-          // 格式3: 领券专用 scheme
-          'imeituan://www.meituan.com/web/couponCenter?poiid=' + poi,
-          // 格式4: 外卖店铺菜单
-          'meituanwaimai://webapp/menu?poi_id_str=' + poi,
-        ];
-        // 优先尝试第一个（外卖商家页），这是最常用的格式
-        return Response.redirect(deepLinks[0], 302);
+        // 构造美团领券活动页 URL（与 Scriptable 脚本一致）
+        const activityUrl = buildClaim(poi, ver);
+        // 用 imeituan:// scheme 包装，iOS Safari 收到后立即唤起美团 App 打开该领券页
+        const appDeepLink = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
+        return Response.redirect(appDeepLink, 302);
       }
 
       // ③ 有 H5 店铺页 URL 但没拿到 poi → 302 到 H5 页面本身（iOS 上该域名可能有 Universal Link）
