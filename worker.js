@@ -152,9 +152,9 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    /* ?jk=v8|v6=<美团分享链接/整段话术> → 解析短链 → 提取 Deep Link → 302 直跳美团 App
+    /* ?jk=v8|v6=<美团分享链接/整段话术> → 解析短链 → 提取 poi_id_str → 构造 Deep Link → 302 直跳美团 App
        例：?jk=v8=我最近很喜欢「肯德基宅急送」… http://dpurl.cn/MRSvOKiz
-       效果：iOS Safari 打开后立即唤起美团 App 进入对应商家津贴页 */
+       效果：iOS Safari 打开此 URL 后立刻收到 302 到 imeituan:// / meituanwaimai:// → 立即唤起美团 App */
     if (url.searchParams.has('jk')) {
       const raw = decodeURIComponent(url.searchParams.get('jk') || '');
       let ver = 'v8', text = raw;
@@ -167,115 +167,111 @@ export default {
         return json({ ok: false, error: '未检测到有效链接，请确保内容包含 http(s) 开头的地址' }, 400);
       }
 
-      // ====== 模拟 iPhone UA 跟随所有 302 跳转，收集每一步的 URL 和 body 中可能出现的 Deep Link ======
+      // ====== 跟随短链跳转，提取 poi_id_str ======
       const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
-      let deepLink = null;
-      let finalH5Url = null;
+      let foundPoi = null;
+      let h5ShopUrl = null; // 兜底用的 H5 店铺页
 
-      async function followAndExtract(u, depth) {
-        if (depth > 12) return;
+      async function chaseForPoi(u, depth) {
+        if (depth > 12 || foundPoi) return;
         try {
           const r = await fetch(u, {
             headers: { 'User-Agent': ua, 'Accept': '*/*' },
             redirect: 'manual'
           });
 
-          // ---- 检查当前响应的 Location 头是否是 Deep Link ----
+          // 302 重定向：检查 Location 中是否直接带 poi 或 Deep Link
           if (r.status >= 300 && r.status < 400) {
             const loc = r.headers.get('location');
-            if (loc) {
-              const absLoc = new URL(loc, u).href;
-              // 优先匹配：Location 就是 App Scheme
-              deepLink = extractDeepLink(absLoc) || deepLink;
-              if (deepLink) return; // 找到了就停止
-              finalH5Url = absLoc;
-              await followAndExtract(absLoc, depth + 1);
-              return;
-            }
+            if (!loc) return;
+            const absLoc = new URL(loc, u).href;
+            // 检查是否本身就是 Deep Link
+            const dl = extractDeepLink(absLoc);
+            if (dl) { foundPoi = '__DEEPLINK__:' + dl; return; }
+            // 从 Location URL 提取 poi
+            const p = extractPoi(absLoc);
+            if (p) { foundPoi = p; return; }
+            h5ShopUrl = absLoc;
+            await chaseForPoi(absLoc, depth + 1);
+            return;
           }
 
-          // ---- 检查 body 中是否有 Deep Link（JS 跳转、meta refresh、scheme href 等）----
+          // 200 响应：检查 body
           const body = await r.text().catch(() => '');
 
-          // 1) body 内的 JS location 赋值
-          for (const jm of [
-            body.match(/location\.href\s*=\s*"([^"]+)"/i),
-            body.match(/location\.href\s*=\s*'([^']+)/i),
-            body.match(/window\.open\s*\(\s*"([^"]+)"/i),
-            body.match(/window\.open\s*\(\s*'([^']+)/i),
-          ]) {
-            if (jm && jm[1]) {
-              const jTarget = new URL(jm[1], r.url || u).href;
-              deepLink = extractDeepLink(jTarget) || deepLink;
-              if (deepLink) return;
-              await followAndExtract(jTarget, depth + 1);
-              return;
-            }
+          // body 里的 Deep Link（有些 H5 页面会内嵌 scheme）
+          const bodyDL = extractDeepLink(body);
+          if (bodyDL) { foundPoi = '__DEEPLINK__:' + bodyDL; return; }
+
+          // body 里显式写的 poi_id_str
+          const bp = extractPoi(body);
+          if (bp) { foundPoi = bp; return; }
+
+          // JS 跳转链接中可能带 poi
+          const jsTarget = (
+            body.match(/location\.href\s*=\s*["']([^"']+)["']/i) ||
+            body.match(/window\.open\s*\(\s*["']([^"']+)["']/i)
+          );
+          if (jsTarget && jsTarget[1]) {
+            const jt = new URL(jsTarget[1], r.url || u).href;
+            const jp = extractPoi(jt);
+            if (jp) { foundPoi = jp; return; }
+            // 也可能是 Deep Link
+            const jdl = extractDeepLink(jt);
+            if (jdl) { foundPoi = '__DEEPLINK__:' + jdl; return; }
+            await chaseForPoi(jt, depth + 1);
+            return;
           }
 
-          // 2) meta refresh
+          // meta refresh
           const metaM = body.match(/http-equiv=["']?refresh["']?[^>]*url=([^"'>\s]+)/i);
           if (metaM) {
-            const mTarget = new URL(metaM[1], r.url || u).href;
-            deepLink = extractDeepLink(mTarget) || deepLink;
-            if (deepLink) return;
-            await followAndExtract(mTarget, depth + 1);
+            const mt = new URL(metaM[1], r.url || u).href;
+            const mp = extractPoi(mt);
+            if (mp) { foundPoi = mp; return; }
+            await chaseForPoi(mt, depth + 1);
             return;
           }
 
-          // 3) <a> 标签中的 scheme href（有些页面用 <a href="imeituan://...">打开App</a>）
-          const aSchemes = body.matchAll(/<a[^>]+href=["'](imeituan[^"']*|meituanwaimai[^"']*|com.meituan[^"']*)/gi);
-          for (const a of aSchemes) { deepLink = a[1]; return; }
+          // 都没找到，记录最终 URL 作为兜底
+          if (!h5ShopUrl) h5ShopUrl = r.url || u;
 
-          // 4) 任意包含 scheme 的字符串
-          const anyScheme = body.match(/(imeituan:\/\/[^\s"<>'\)]+|meituanwaimai:\/\/[^\s"<>'\)]+)/i);
-          if (anyScheme) { deepLink = anyScheme[1]; return; }
-
-          // 5) body 中的通用跳转链接（非 scheme 的继续跟）
-          const jsJump = body.match(/(?:location|window\.open)\s*[=(]\s*(?:['"])(https?:\/\/[^'"]+\1)/i)
-            || body.match(/href\s*=\s*["'](https?:\/\/[^"']+poi_id[^"']*)["']/i);
-          if (jsJump && !deepLink) {
-            await followAndExtract(new URL(jsJump[1] || jsJump[2], r.url).href, depth + 1);
-            return;
-          }
-
-          // 记录最终 H5 URL 作为兜底
-          if (!finalH5Url) finalH5Url = r.url || u;
-
-        } catch (e) { /* 跟踪中断 */ }
+        } catch (e) { /* 静默 */ }
       }
 
-      await followAndExtract(linkMatch[0], 0);
+      await chaseForPoi(linkMatch[0], 0);
 
-      // ====== 决定跳转目标 ======
-      if (deepLink) {
-        // ✅ 找到 Deep Link：302 直跳，iOS Safari 收到后立即唤起美团 App
-        return Response.redirect(deepLink, 302);
+      // ====== 根据结果构造跳转 ======
+
+      // ① 直接拿到了 Deep Link（极罕见，但保留）
+      if (foundPoi && foundPoi.startsWith('__DEEPLINK__:')) {
+        return Response.redirect(foundPoi.slice(13), 302);
       }
 
-      // ❌ 未找到 Deep Link：尝试从最终 URL/body 提取 poi_id_str，生成领券页作为兜底
-      if (finalH5Url) {
-        let fallbackPoi = extractPoi(finalH5Url);
-        if (!fallbackPoi) {
-          // 最后一次尝试：请求最终 URL 的 body
-          try {
-            const fr = await fetch(finalH5Url, {
-              headers: { 'User-Agent': ua }, redirect: 'manual'
-            });
-            const fb = await fr.text().catch(() => '');
-            fallbackPoi = extractPoi(fb) || extractDeepLink(fb); // extractDeepLink 也可能从 body 抓到 scheme
-            if (extractDeepLink(fb)) return Response.redirect(extractDeepLink(fb), 302);
-          } catch (e) {}
-        }
-        if (fallbackPoi) {
-          return Response.redirect(buildClaim(fallbackPoi, ver), 302);
-        }
-        // 最终兜底：302 到 H5 店铺页本身
-        return Response.redirect(finalH5Url, 302);
+      // ② 拿到了 poi_id_str → 构造美团 App Deep Link 并 302 直跳
+      if (foundPoi) {
+        const poi = foundPoi;
+        const deepLinks = [
+          // 格式1: meituanwaimai:// 打开外卖商家页（最可能触发津贴）
+          'meituanwaimai://webapp/shop?poi_id_str=' + poi,
+          // 格式2: imeituan:// 打开通用店铺详情
+          'imeituan://www.meituan.com/web/poiDetail?poiid=' + poi + '&source_type=external',
+          // 格式3: 领券专用 scheme
+          'imeituan://www.meituan.com/web/couponCenter?poiid=' + poi,
+          // 格式4: 外卖店铺菜单
+          'meituanwaimai://webapp/menu?poi_id_str=' + poi,
+        ];
+        // 优先尝试第一个（外卖商家页），这是最常用的格式
+        return Response.redirect(deepLinks[0], 302);
       }
 
-      // 完全失败
-      return json({ ok: false, error: '无法解析出店铺或 Deep Link，请确认是有效的美团店铺分享链接' }, 422);
+      // ③ 有 H5 店铺页 URL 但没拿到 poi → 302 到 H5 页面本身（iOS 上该域名可能有 Universal Link）
+      if (h5ShopUrl) {
+        return Response.redirect(h5ShopUrl, 302);
+      }
+
+      // ④ 彻底失败
+      return json({ ok: false, error: '无法解析出店铺信息，请确认分享链接有效' }, 422);
     }
 
     /* 领券链接生成接口（供脚本 / 快捷指令快速调用） */
