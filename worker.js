@@ -311,6 +311,35 @@ export default {
       return json({ ok: true, poi, v8: buildClaim(poi, 'v8'), v6: buildClaim(poi, 'v6') });
     }
 
+    /* 深链接口：输入分享链接/整段话术 → 解析 poi → 返回可唤起美团 App 的 imeituan:// 深链（JSON）
+       供快捷指令调用：「获取 URL 内容」/api/deeplink?ver=v8&url=<剪贴板> → 取 app 字段 →「打开 URL」唤起 App
+       例：/api/deeplink?ver=v8&url=http://dpurl.cn/xxxx
+       返回：{ ok, poi, ver, app: "imeituan://...", h5: "https://offsiteact..." } */
+    if (path === '/api/deeplink') {
+      const target = url.searchParams.get('url');
+      if (!target) return json({ ok: false, error: 'missing url' }, 400);
+      let ver = url.searchParams.get('ver') || 'v8';
+      const vm = String(ver).match(/^v?([68])$/);
+      ver = vm ? 'v' + vm[1] : 'v8';
+      // 从整段文本抽第一个 http(s) 链接（兼容直接传整段分享话术）
+      const linkMatch = String(target).match(/https?:\/\/[^\s"'<>）)\]]+/);
+      const link = linkMatch ? linkMatch[0] : target;
+      const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+      try {
+        const final = await follow(link, ua, 0);
+        const poi = extractPoi(final.url) || extractPoi(final.body);
+        if (!poi) {
+          const poiNum = extractPoiNum(final.url) || extractPoiNum(final.body);
+          return json({ ok: false, error: '未解析出 poi_id_str', poiNum: poiNum || null, finalUrl: final.url || null }, 422);
+        }
+        const h5 = buildClaim(poi, ver);
+        const app = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(h5);
+        return json({ ok: true, poi, ver, app, h5 });
+      } catch (e) {
+        return json({ ok: false, error: String((e && e.message) || e) }, 500);
+      }
+    }
+
     /* 店铺信息接口：通过 poi_id_str 提取真实店名和头像 */
     if (path === '/api/shop') {
       const poi = url.searchParams.get('poi');

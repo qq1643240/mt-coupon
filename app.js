@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.28'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.29'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -635,6 +635,7 @@ function showApiDocs() {
     { p: '?poi=<poi>', d: '打开本机已收藏的该商家详情（需本机先识别收藏过）。' },
     { p: '/api/shop?poi=<poi>', d: '返回该商家真实店名与头像，JSON：{ok,logo,name}，供详情页实时刷新头像用。' },
     { p: '/api/claim?poi=<poi>', d: '返回该商家 v8 / v6 领券链接，JSON：{ok,poi,v8,v6}。' },
+    { p: '/api/deeplink?ver=v8&url=<分享链接>', d: '【接口版·跳 App】输入美团分享链接/整段话术，解析 poi 后返回可唤起美团 App 的深链，JSON：{ok,poi,ver,app,h5}。快捷指令取 app 字段用「打开 URL」即唤起 App。ver=v8 主券 / v6 第二张。' },
     { p: '/resolve?url=<链接>', d: '服务端跟随跳转解析任意美团短链/分享链接，返回 poi、店名、头像等 JSON。' }
   ];
   $('#modalTitle').textContent = 'API 调用说明';
