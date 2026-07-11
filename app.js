@@ -54,8 +54,8 @@ function ts(y, mo, d, h, mi, s) { return new Date(y, mo - 1, d, h, mi, s).getTim
 
 /* 种子数据（首次打开无本地数据时） */
 const seed = [
-  { id: '395505', name: '旺角大排档（粤菜小炒、啫啫煲）', poi: '7FATrlwYZgjK0Wo13H0zOAI', amount: '3元商家券', logo: '', note: '', pinned: true,  claimed: false, updatedAt: ts(2026, 7, 11, 11, 17, 26) },
-  { id: '395165', name: '川味轩（南新五路店）',           poi: 'e1G07VLcvSyapClYCnYeYQI', amount: '3元商家券', logo: '', note: '', pinned: false, claimed: false, updatedAt: ts(2026, 7, 11, 10, 54, 45) }
+  { id: '395505', name: '旺角大排档（粤菜小炒、啫啫煲）', poi: '7FATrlwYZgjK0Wo13H0zOAI', amount: '', logo: '', note: '', pinned: true,  claimed: false, updatedAt: ts(2026, 7, 11, 11, 17, 26) },
+  { id: '395165', name: '川味轩（南新五路店）',           poi: 'e1G07VLcvSyapClYCnYeYQI', amount: '', logo: '', note: '', pinned: false, claimed: false, updatedAt: ts(2026, 7, 11, 10, 54, 45) }
 ];
 
 let data = load();
@@ -138,6 +138,18 @@ function extractName(text) {
   if (m) return m[1].trim();
   return '';
 }
+// 判断店铺名是否有效（过滤纯平台名/无意义名称）
+function isValidShopName(name) {
+  if (!name || !name.trim()) return false;
+  const s = name.trim();
+  // 纯平台名、过短、无意义名称
+  if (/^(美团|大众点评|美团外卖|Meituan|Dianping)$/.test(s)) return false;
+  if (s.length < 2) return false;
+  // 只有平台关键词没有实际店名
+  if (/^(美团|大众点评)[·\-–|:\s]/.test(s) || /[·\-–|:\s](美团|大众点评)$/.test(s)) return false;
+  return true;
+}
+
 // 美团黄色平台 logo（拿不到真实商家头像时的降级兜底）
 const MEITUAN_FALLBACK_LOGO = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#FFD100"/><text x="50" y="68" text-anchor="middle" font-size="42" font-weight="bold" fill="#333">美团</text></svg>');
 
@@ -213,7 +225,7 @@ function render() {
         ${logoHtml(it)}
         <div class="shop-meta">
           <div class="card-name" title="${esc(it.name)}">${esc(it.name)}</div>
-          <div class="card-sub"><span>${esc(it.amount || '')}</span>${it.claimed ? '<span class="claimed-tag">' + ICON.check + '已领取</span>' : ''}</div>
+          <div class="card-sub"><span>${esc(it.amount || '')}</span>${it.claimed ? '<span class="claimed-tag">' + ICON.check + '最新领取</span>' : ''}</div>
           ${it.updatedAt ? `<div class="card-time">最新领取：${fmtTime(it.updatedAt)}</div>` : ''}
         </div>
         <div class="card-pin">${it.pinned ? ICON.pin : ''}</div>
@@ -281,13 +293,13 @@ function claim(it, which) {
 $('#addBtn').addEventListener('click', () => openEditor(null));
 function openEditor(it) {
   const editing = !!it;
-  const item = it || { id: uid(), name: '', poi: '', amount: '3元商家券', logo: '', note: '', pinned: false, claimed: false, updatedAt: Date.now() };
+  const item = it || { id: uid(), name: '', poi: '', amount: '', logo: '', note: '', pinned: false, claimed: false, updatedAt: Date.now() };
   $('#modalTitle').textContent = editing ? '编辑收藏' : '新增收藏';
   $('#modalBody').innerHTML = `
     <div class="field"><label>店铺名称</label><input id="f_name" value="${esc(item.name)}" placeholder="例如：木桶饭湘菜馆（南海店）"></div>
     <div class="field"><label>logo 图片地址（选填，留空用首字色块）</label><input id="f_logo" value="${esc(item.logo)}" placeholder="https://.../logo.png"></div>
     <div class="row">
-      <div class="field"><label>券面额</label><input id="f_amount" value="${esc(item.amount)}" placeholder="例如：3元商家券"></div>
+      <div class="field"><label>券面额（选填）</label><input id="f_amount" value="${esc(item.amount)}" placeholder="例如：3元商家券"></div>
       <div class="field"><label>置顶</label>
         <select id="f_pinned">
           <option value="0" ${!item.pinned ? 'selected' : ''}>否</option>
@@ -336,7 +348,7 @@ function openDetail(it) {
       ${logoHtml(it)}
       <div>
         <div class="h-name">${esc(it.name)}</div>
-        <div class="h-sub">${esc(it.amount || '')} ${it.claimed ? '· <span class="claimed-tag">' + ICON.check + '已领取</span>' : '<span class="pill">待领取</span>'}</div>
+        <div class="h-sub">${esc(it.amount || '')} ${it.claimed ? '· <span class="claimed-tag">' + ICON.check + '最新领取</span>' : '<span class="pill">待领取</span>'}</div>
       </div>
     </div>
     ${it.poi ? `
@@ -360,8 +372,8 @@ function openDetail(it) {
         const shopName = j.name;
         let changed = false;
 
-        // 更新名称（如果后端返回了更完整的名字）
-        if (shopName && shopName !== it.name && it.name !== '该店铺') {
+        // 更新名称（如果后端返回了更完整且有效的名字）
+        if (isValidShopName(shopName) && shopName !== it.name && it.name !== '该店铺') {
           it.name = shopName; changed = true;
           const hName = document.querySelector('.h-name');
           if (hName) hName.textContent = esc(shopName);
@@ -459,7 +471,7 @@ function autoSave(poi, opts) {
     it.updatedAt = Date.now();
     if (opts.name && (!it.name || it.name === '该店铺')) it.name = opts.name;
   } else {
-    it = { id: uid(), name: opts.name || '该店铺', poi, amount: '3元商家券', logo: '', note: '', pinned: false, claimed: false, updatedAt: Date.now() };
+    it = { id: uid(), name: opts.name || '该店铺', poi, amount: '', logo: '', note: '', pinned: false, claimed: false, updatedAt: Date.now() };
     data.push(it);
   }
   save(); render();

@@ -193,8 +193,10 @@ http.createServer((req, res) => {
         try {
           let nv = extractMeta(body, 'og:title') || extractMeta(body, 'twitter:title');
           if (!nv) { const tm = body.match(/<title>([^<]+)<\/title>/i); nv = tm ? tm[1].trim() : null; }
-          if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券).*$/i, '').replace(/^\s+|\s+$/g, '');
+          if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券|美团网).*$|^[^\u4e00-\u9fa5]*(美团|大众点评)[^\u4e00-\u9fa5]*$/i, '').replace(/^\s+|\s+$/g, '');
           if (name) name = name.replace(/\s*[-–|]\s*(在线点餐|配送中|正在营业|已打烊|美团外卖|外卖).*/i, '').trim();
+          // 最终校验：纯平台名/过短/无意义 → 视为无效
+          if (name && (/^(美团|大众点评|美团外卖|Meituan|Dianping)$/.test(name) || name.length < 2)) name = null;
         } catch (e) {}
         if (logo || name) {
           let logoUrl = null;
