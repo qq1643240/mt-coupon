@@ -88,6 +88,63 @@ function buildClaim(poi, ver) {
   return base + '?' + params.toString();
 }
 
+/* 从美团页面提取店铺真实头像（排除平台 logo） */
+function extractLogo(s) {
+  if (!s) return null;
+  function isPlatformLogo(url) {
+    if (!url) return false;
+    const u = url.toLowerCase();
+    return /(meituan[-_]?logo|dianping[-_]?logo|share.*default|brand.*logo.*platform|appicon|apple-touch-icon|favicon|logo.*meituan\.com|logo.*dianping)/i.test(u)
+      || (u.includes('meituan.com') && /\/(logo|icon|brand|app)\./i.test(u))
+      || (u.includes('dianping.com') && /\/(logo|icon|brand|app)\./i.test(u));
+  }
+  // JSON 数据中的店铺图片（最可靠）
+  const jsonFields = ['picUrl', 'shopLogo', 'shopLogoUrl', 'headImg', 'avatar', 'frontImg', 'poiPic', 'shopIcon', 'photo', 'imageUrl', 'coverImg', 'logoUrl', 'brandLogo'];
+  for (const f of jsonFields) {
+    const m = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\']([^"\']+?)["\']', 'i'));
+    if (m && m[1] && !isPlatformLogo(m[1]) && /\.(jpg|jpeg|png|webp|gif)/i.test(m[1])) return m[1];
+    const m2 = s.match(new RegExp('["\']' + f + '"\\s*:\\s*["\'](https?://[^"\']+)["\']', 'i'));
+    if (m2 && m2[1] && !isPlatformLogo(m2[1]) && /\.(jpg|jpeg|png|webp|gif)/i.test(m2[1])) return m2[1];
+  }
+  // <img> 标签中找店铺图
+  const shopImgPatterns = [
+    /<img[^>]+(?:class|id)=["'][^"']*(?:shop|poi|store|merchant|biz|restaurant)[^"']*["'][^>]+src=["']([^"'\s]+?)["']/gi,
+    /<img[^>]+src=["'](https?:\/\/(?:p\d|img|ms\d)\.(?:meituan|meishi)\.(net|com)[^"']*(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
+    /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.(?:dpfile|dianping)\.[a-z]+[^"']*(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
+  ];
+  for (const p of shopImgPatterns) { p.lastIndex = 0; let found; while ((found = p.exec(s))) { if (found[1] && !isPlatformLogo(found[1])) return found[1]; } }
+  // og:image 作为兜底
+  function extractMeta(s, prop) {
+    if (!s) return null;
+    let m = s.match(new RegExp('<meta[^>]+property=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
+    if (m) return m[1];
+    m = s.match(new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']?' + prop, 'i'));
+    if (m) return m[1];
+    m = s.match(new RegExp('<meta[^>]+name=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
+    if (m) return m[1];
+    return null;
+  }
+  let v = extractMeta(s, 'og:image');
+  if (v && !isPlatformLogo(v)) return v;
+  v = extractMeta(s, 'twitter:image');
+  if (v && !isPlatformLogo(v)) return v;
+  // 任意合理图片
+  const anyImg = /<img[^>]+src=["']((?!data:|about:|javascript:|1x1|pixel|beacon|tracker|spacer|empty|placeholder|loading|gray|grey|logo\.|icon\.)[^"']+\.(jpg|jpeg|png|webp)(?:\?[^"']*)?)["']/gi;
+  while ((v = anyImg.exec(s))) { if (v[1] && !isPlatformLogo(v[1])) return v[1]; }
+  return null;
+}
+
+function extractMeta(s, prop) {
+  if (!s) return null;
+  let m = s.match(new RegExp('<meta[^>]+property=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
+  if (m) return m[1];
+  m = s.match(new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']?' + prop, 'i'));
+  if (m) return m[1];
+  m = s.match(new RegExp('<meta[^>]+name=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
+  if (m) return m[1];
+  return null;
+}
+
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost:' + port);
 
@@ -113,6 +170,42 @@ http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.writeHead(200, { 'Content-Type': types['.json'] });
     res.end(JSON.stringify({ ok: true, poi, v8: buildClaim(poi, 'v8'), v6: buildClaim(poi, 'v6') }));
+    return;
+  }
+
+  /* ---- 店铺信息接口：通过 poi_id_str 提取真实店名和头像 ---- */
+  if (u.pathname === '/api/shop') {
+    const poi = u.searchParams.get('poi');
+    if (!poi) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'missing poi' })); return; }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const candidates = [
+      'https://h5.waimai.meituan.com/poi/' + poi,
+      'https://www.meituan.com/poi/' + poi,
+      'https://m.dianping.com/appshare/shop/' + poi,
+      'https://waimai.meituan.com/restaurant/' + poi
+    ];
+    (function tryNext(i) {
+      if (i >= candidates.length) { res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, poi, logo: null, name: null })); return; }
+      follow(candidates[i], 0, (err, finalUrl, body) => {
+        if (err || !body) return tryNext(i + 1);
+        const logo = extractLogo(body);
+        let name = null;
+        try {
+          let nv = extractMeta(body, 'og:title') || extractMeta(body, 'twitter:title');
+          if (!nv) { const tm = body.match(/<title>([^<]+)<\/title>/i); nv = tm ? tm[1].trim() : null; }
+          if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券).*$/i, '').replace(/^\s+|\s+$/g, '');
+          if (name) name = name.replace(/\s*[-–|]\s*(在线点餐|配送中|正在营业|已打烊|美团外卖|外卖).*/i, '').trim();
+        } catch (e) {}
+        if (logo || name) {
+          let logoUrl = null;
+          if (logo) try { logoUrl = new URL(logo, finalUrl).href; } catch (e) {}
+          res.writeHead(200, { 'Content-Type': types['.json'] });
+          res.end(JSON.stringify({ ok: true, poi, logo: logoUrl || null, name: name || null }));
+        } else {
+          tryNext(i + 1);
+        }
+      });
+    })(0);
     return;
   }
 

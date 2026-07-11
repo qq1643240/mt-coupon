@@ -141,12 +141,23 @@ function extractName(text) {
 // 美团黄色平台 logo（拿不到真实商家头像时的降级兜底）
 const MEITUAN_FALLBACK_LOGO = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#FFD100"/><text x="50" y="68" text-anchor="middle" font-size="42" font-weight="bold" fill="#333">美团</text></svg>');
 
-// logo 优先级：base64缓存 → 外链URL → 美团黄色降级logo → 首字色块（最后兜底）
+// 判断 URL 是否为无效/二维码类图片（需要降级处理）
+function isInvalidLogoUrl(url) {
+  if (!url) return true;
+  const u = String(url).toLowerCase();
+  // 二维码、占位图、1x1像素、data:text、about: 等
+  return /^data:image\/svg/.test(url)
+    || /qrcode|qr_code|qr-code|barcode|二維碼|二维码/i.test(u)
+    || /placeholder|empty|loading|gray|grey|spacer|default.*avatar/i.test(u);
+}
+
+// logo 优先级：base64缓存 → 外链URL(非无效) → 美团黄色降级logo
 function logoHtml(it) {
   const ch = (it.name || '?').trim().charAt(0) || '?';
   const src = it.logoData || it.logo;
-  if (src) return `<img class="logo-img" src="${esc(src)}" alt="" onerror="this.src='${MEITUAN_FALLBACK_LOGO}'">`;
-  // 没有任何logo资源 → 用美团黄色logo降级（不再用首字色块）
+  // 有资源但识别为无效（二维码/SVG占位等）→ 直接降级
+  if (src && !isInvalidLogoUrl(src)) return `<img class="logo-img" src="${esc(src)}" alt="" onerror="this.src='${MEITUAN_FALLBACK_LOGO}'">`;
+  // 无有效资源 → 用美团黄色logo降级（不再用首字色块）
   return `<img class="logo-img" src="${MEITUAN_FALLBACK_LOGO}" alt="">`;
 }
 // 把头像图片下载转 base64 缓存进本机（离线/换网络也能显示）。
@@ -348,13 +359,15 @@ function openDetail(it) {
         const logoUrl = j.logo;
         const shopName = j.name;
         let changed = false;
+
         // 更新名称（如果后端返回了更完整的名字）
         if (shopName && shopName !== it.name && it.name !== '该店铺') {
           it.name = shopName; changed = true;
           const hName = document.querySelector('.h-name');
           if (hName) hName.textContent = esc(shopName);
         }
-        // 更新/缓存头像
+
+        // 更新/缓存头像（无条件更新：即使已有旧logo也替换为最新的）
         if (logoUrl && logoUrl !== it.logoSrc) {
           cacheImage(logoUrl).then(b64 => {
             it.logoSrc = logoUrl;
@@ -363,32 +376,12 @@ function openDetail(it) {
             save(); render();
           });
           changed = true;
+        } else if (!it.logoData && !it.logo || isInvalidLogoUrl(it.logo)) {
+          // 当前无有效头像 → 清除无效logo，让渲染时自动降级为美团黄logo
+          if (it.logo) { delete it.logo; delete it.logoData; delete it.logoSrc; changed = true; }
         }
+
         if (changed) save();
-      })
-      .catch(() => {});
-  }
-  // 如果完全没有头像资源（旧数据），也尝试获取
-  if (it.poi && !it.logoData && !it.logo) {
-    fetch('/api/shop?poi=' + encodeURIComponent(it.poi))
-      .then(r => r.json().catch(() => ({})))
-      .then(j => {
-        if (!(j && j.ok)) return;
-        const logoUrl = j.logo;
-        const shopName = j.name;
-        // 更新名称
-        if (shopName && (!it.name || it.name === '该店铺')) {
-          it.name = shopName; save(); render();
-          const hName = document.querySelector('.h-name');
-          if (hName) hName.textContent = esc(shopName);
-        }
-        // 缓存头像
-        if (logoUrl) cacheImage(logoUrl).then(b64 => {
-          it.logoSrc = logoUrl;
-          if (b64) { it.logoData = b64; delete it.logo; }
-          else { it.logo = logoUrl; }
-          save(); render();
-        });
       })
       .catch(() => {});
   }
