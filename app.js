@@ -10,6 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
+const VERSION = '1.21'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -225,8 +226,8 @@ function render() {
         ${logoHtml(it)}
         <div class="shop-meta">
           <div class="card-name" title="${esc(it.name)}">${esc(it.name)}</div>
-          <div class="card-sub"><span>${esc(it.amount || '')}</span>${it.claimed ? '<span class="claimed-tag">' + ICON.check + '最新领取</span>' : ''}</div>
-          ${it.updatedAt ? `<div class="card-time">最新领取：${fmtTime(it.updatedAt)}</div>` : ''}
+          <div class="card-sub"><span>${esc(it.amount || '')}</span></div>
+          ${it.updatedAt ? `<div class="card-time${it.claimed ? ' claimed' : ''}">最新领取：${fmtTime(it.updatedAt)}</div>` : ''}
         </div>
         <div class="card-pin">${it.pinned ? ICON.pin : ''}</div>
       </div>
@@ -348,9 +349,10 @@ function openDetail(it) {
       ${logoHtml(it)}
       <div>
         <div class="h-name">${esc(it.name)}</div>
-        <div class="h-sub">${esc(it.amount || '')} ${it.claimed ? '· <span class="claimed-tag">' + ICON.check + '最新领取</span>' : '<span class="pill">待领取</span>'}</div>
+        <div class="h-sub">${esc(it.amount || '')} ${it.claimed ? '' : '<span class="pill">待领取</span>'}</div>
       </div>
     </div>
+    ${it.claimed && it.updatedAt ? `<div class="modal-time claimed">最新领取：${fmtTime(it.updatedAt)}</div>` : ''}
     ${it.poi ? `
       <div class="channel"><div class="ch-left"><span class="ch-ic">${ICON.ticket}</span><div><div class="ch-label">领取通道（可切号）</div><div class="ch-sub">主领取 v8</div></div></div><button class="btn btn-ok" id="ch1"><span class="bi">${ICON.open}</span>打开</button></div>
       <div class="channel"><div class="ch-left"><span class="ch-ic">${ICON.ticket}</span><div><div class="ch-label">领取通道（额外第2张）</div><div class="ch-sub">第二张 v6</div></div></div><button class="btn" id="ch2"><span class="bi">${ICON.open}</span>打开</button></div>
@@ -557,7 +559,9 @@ $('#search').addEventListener('input', e => {
     searchTimer = setTimeout(() => handleLinkSearch(v), 500);
     return;
   }
-  render();
+  // 普通文字搜索：防抖，避免逐字符重渲染
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(render, 120);
 });
 $('#search').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
@@ -673,5 +677,6 @@ function handleDeepLink() {
 }
 
 injectIcons();
+const _fv = document.getElementById('footVer'); if (_fv) _fv.textContent = 'v' + VERSION;
 render();
 handleDeepLink();
