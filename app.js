@@ -111,6 +111,7 @@ function injectIcons() {
   set('addBtn', ICON.plus);
   set('searchClear', ICON.close);
   set('claimIc', ICON.ticket);
+  set('qjIc', ICON.bolt);
 }
 function extractPoi(url) {
   const m = String(url || '').match(/poi_id_str=([^&\s"'<>\\]+)/);
@@ -738,6 +739,42 @@ function handleDeepLink() {
     else toast('本机未收藏该商家，请先识别');
   }
 }
+
+/* ---------- 一键读剪贴板直跳 imeituan:// 美团 App 领券 ---------- */
+let qjVer = 'v8';
+function imeituanDeepLink(poi, ver) {
+  const activityUrl = buildUrl(poi, ver); // offsiteact.meituan.com H5 领券页
+  return 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
+}
+async function quickJumpFromClipboard() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch (e) {}
+  if (!text) { toast('剪贴板为空或无法读取，请先复制美团分享链接'); return; }
+  const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
+  if (!um) { toast('剪贴板里没有美团链接'); return; }
+  toast('正在解析店铺…');
+  try {
+    const r = await fetch('/resolve?url=' + encodeURIComponent(um[0]));
+    const info = await r.json().catch(() => ({}));
+    if (info && info.poi) {
+      const it = data.find(d => d.poi === info.poi);
+      if (it) { it.claimed = true; it.updatedAt = Date.now(); }
+      bumpStat(qjVer === 'v6' ? 2 : 1);
+      save(); render();
+      location.href = imeituanDeepLink(info.poi, qjVer); // 直接唤起美团 App（iOS 弹确认框）
+      toast('已唤起美团 App（' + (qjVer === 'v6' ? 'v6' : 'v8') + '）');
+    } else if (info && info.poiNum) {
+      toast('该链接只含数字店铺ID，无 poi_id_str，无法直跳');
+    } else {
+      toast('解析失败，请确认是美团店铺分享链接');
+    }
+  } catch (e) { toast('解析请求失败'); }
+}
+$('#qjClip').addEventListener('click', quickJumpFromClipboard);
+document.querySelectorAll('.qj-ver-btn').forEach(b => b.addEventListener('click', () => {
+  qjVer = b.dataset.ver;
+  document.querySelectorAll('.qj-ver-btn').forEach(x => x.classList.toggle('active', x === b));
+}));
 
 injectIcons();
 const _fv = document.getElementById('footVer'); if (_fv) _fv.textContent = 'v' + VERSION;
