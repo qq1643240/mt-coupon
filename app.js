@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.26'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.27'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -628,6 +628,7 @@ function showApiDocs() {
   const base = location.origin;
   const rows = [
     { p: '?jk=v8=<美团分享链接>', d: '【一键跳 App 领券】把整段分享话术（或带 poi 的链接）直接贴进来，服务端自动解析 poi_id_str 后 302 跳转到美团 App 领券页。v8 主券 / v6 第二张，无需打开本站页面，最适合做 iOS 快捷指令。' },
+    { p: '?jkclip=v8', d: '【读剪贴板直跳 App·链接版】打开此链接后页面自动读取剪贴板里的美团分享链接→解析 poi→跳 App，等于把首页「读剪贴板·直跳美团 App 领券」按钮变成一条可分享/可放快捷指令的链接（v8 主券 / v6 第二张）。iOS 若自动读剪贴板被拦截，点一下页面顶部按钮即可。' },
     { p: '?claim=<poi>&v=8', d: '【跳 App 领券】已知 poi_id_str 时直接跳转美团 App/H5 领取（v8 主券，v=6 为第二张）。' },
     { p: '?url=<美团分享链接>', d: '自动识别店铺 poi_id_str 并打开详情（识别即收藏）。iOS 快捷指令最常用：复制链接后用「打开 URL」跳到这里即可。' },
     { p: '?open=<任意网址>', d: '中转直接打开任意网址（用于需要统一入口的场景）。' },
@@ -686,8 +687,21 @@ function handleDeepLink() {
   const jk = p.get('jk');
   const openUrl = p.get('open');
   const poi = p.get('poi');
+  const jkclip = p.get('jkclip');
 
   if (openUrl) { window.location.href = openUrl; return; }
+
+  /* ?jkclip=v8|v6：打开本页后自动读剪贴板→解析→跳 App（把首页按钮变成一条可分享/可放快捷指令的链接） */
+  if (jkclip) {
+    let ver = 'v8';
+    const vm = String(jkclip).match(/^v?([68])$/);
+    if (vm) ver = 'v' + vm[1];
+    qjVer = ver;
+    document.querySelectorAll('.qj-ver-btn').forEach(x => x.classList.toggle('active', x.dataset.ver === ver));
+    quickJumpFromClipboard();
+    history.replaceState(null, '', location.pathname);
+    return;
+  }
 
   /* ?jk=v8=<分享话术/链接>：客户端兜底解析 poi 并跳转到美团领券页（worker 301 未生效时生效） */
   if (jk) {
