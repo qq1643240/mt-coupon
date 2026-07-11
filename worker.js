@@ -168,13 +168,11 @@ export default {
         }
       }
       if (poi) return Response.redirect(buildClaim(poi, ver), 302);
-      return new Response(
-        '<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>解析失败</title>' +
-        '<style>body{font-family:system-ui,' + "'PingFang SC','Microsoft YaHei',sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.box{text-align:center;padding:24px;max-width:340px;line-height:1.7}.e{color:#ff6b6b;font-size:16px;margin-bottom:10px}.s{color:#aaa;font-size:13px}</style>' +
-        '</head><body><div class="box"><div class="e">⚠️ 未能从分享内容中解析出店铺</div>' +
-        '<div class="s">请确认粘贴的是「美团外卖店铺分享」链接（含 poi_id_str），或带可跳转的店铺短链。</div></div></body></html>',
-        { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-      );
+      const errHtml = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>解析失败</title>
+<style>body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#111;color:#eee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.box{text-align:center;padding:24px;max-width:340px;line-height:1.7}.e{color:#ff6b6b;font-size:16px;margin-bottom:10px}.s{color:#aaa;font-size:13px}</style>
+</head><body><div class="box"><div class="e">⚠️ 未能从分享内容中解析出店铺</div>
+<div class="s">请确认粘贴的是「美团外卖店铺分享」链接（含 poi_id_str），或带可跳转的店铺短链。</div></div></body></html>`;
+      return new Response(errHtml, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     /* 领券链接生成接口（供脚本 / 快捷指令快速调用） */
