@@ -136,6 +136,43 @@ function extractLogo(s) {
   while ((v = anyImg.exec(s))) { if (v[1] && !isPlatformLogo(v[1])) return v[1]; }
   return null;
 }
+// 返回一个"唤起 App 中转页"：页面加载即用 JS 触发 scheme（iOS Safari 只认页面内触发，不认服务器 302 跳 scheme）
+// app: imeituan:// 深链；h5: 兜底 H5 地址（App 未安装时降级打开），可为空
+function appJumpPage(app, h5) {
+  const appJson = JSON.stringify(app);
+  const h5Json = JSON.stringify(h5 || '');
+  const html = `<!doctype html><html lang="zh"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>正在打开美团…</title>
+<style>
+  html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+    background:linear-gradient(160deg,#FFE08A,#FFC93C);color:#1c1c1e}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;text-align:center}
+  .spin{width:34px;height:34px;border:3px solid rgba(28,28,30,.25);border-top-color:#1c1c1e;border-radius:50%;animation:r .8s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .tip{font-size:15px;font-weight:600;opacity:.85}
+  .btn{margin-top:6px;display:inline-block;padding:13px 26px;border-radius:14px;background:#1c1c1e;color:#FFC93C;
+    font-size:15px;font-weight:700;text-decoration:none;box-shadow:0 6px 18px rgba(0,0,0,.2)}
+</style></head><body><div class="wrap">
+  <div class="spin"></div>
+  <div class="tip">正在唤起美团 App 领券…</div>
+  <a class="btn" id="go" href="#">未自动打开？点这里</a>
+</div><script>
+  var APP=${appJson}, H5=${h5Json};
+  document.getElementById('go').setAttribute('href', APP);
+  var jumped=false;
+  var t=setTimeout(function(){ if(!jumped && H5){ location.href=H5; } }, 2500);
+  document.addEventListener('visibilitychange', function(){ if(document.hidden){ jumped=true; clearTimeout(t);} });
+  window.addEventListener('pagehide', function(){ jumped=true; clearTimeout(t); });
+  // 立即尝试唤起 App（iOS 会弹"是否打开美团"确认框）
+  location.href = APP;
+</script></body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
+  });
+}
 function extractMeta(s, prop) {
   if (!s) return null;
   let m = s.match(new RegExp('<meta[^>]+property=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
@@ -243,19 +280,19 @@ export default {
 
       // ====== 根据结果构造跳转 ======
 
-      // ① 直接拿到了 Deep Link（极罕见，但保留）
+      // ① 直接拿到了 Deep Link（极罕见，但保留）→ 用中转页由 JS 触发唤起（服务器 302 跳 scheme 会被 iOS Safari 拦截）
       if (foundPoi && foundPoi.startsWith('__DEEPLINK__:')) {
-        return Response.redirect(foundPoi.slice(13), 302);
+        return appJumpPage(foundPoi.slice(13), h5ShopUrl);
       }
 
-      // ② 拿到了 poi_id_str → 构造领券页 URL → 用 imeituan:// scheme 包装后 302 直跳 App
+      // ② 拿到了 poi_id_str → 构造领券页 URL → 用 imeituan:// scheme 包装，返回中转页由页面内 JS 唤起 App
       if (foundPoi) {
         const poi = foundPoi;
         // 构造美团领券活动页 URL（与 Scriptable 脚本一致）
         const activityUrl = buildClaim(poi, ver);
-        // 用 imeituan:// scheme 包装，iOS Safari 收到后立即唤起美团 App 打开该领券页
+        // imeituan:// 深链：iOS Safari 只认"页面内 JS 触发"，不认服务器 302 直跳 scheme，故走中转页
         const appDeepLink = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
-        return Response.redirect(appDeepLink, 302);
+        return appJumpPage(appDeepLink, activityUrl); // 兜底降级到 H5 领券页
       }
 
       // ③ 有 H5 店铺页 URL 但没拿到 poi → 302 到 H5 页面本身（iOS 上该域名可能有 Universal Link）
