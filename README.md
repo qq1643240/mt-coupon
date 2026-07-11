@@ -1,6 +1,6 @@
 # 美团券夹 · 领券助手
 
-复刻自 `ffgd.ssss66.xyz` 商家券收藏页，并做优化。纯前端 + Cloudflare Pages 边缘函数，**零后端依赖**，数据存浏览器 `localStorage`。
+复刻自 `ffgd.ssss66.xyz` 商家券收藏页，并做优化。纯前端 + Cloudflare Worker（边缘函数 + 静态资源托管），**零后端依赖**，数据存浏览器 `localStorage`。
 
 ## 功能
 
@@ -44,24 +44,33 @@
 { "ok": true, "poi": "7FATrlwYZgjK0Wo13H0zOAI", "finalUrl": "..." }
 ```
 
-## 一键部署到 Cloudflare Pages
+## 一键部署到 Cloudflare（Worker + 静态资源）
+
+> Cloudflare 现已把 Pages 合并进 Workers，新项目统一建为 **Worker**。`wrangler.toml` 已改为 `main = "worker.js"` + `[assets]` 托管静态文件，`functions/` 已删除。
 
 **方式一：Git 连接（推荐，自动持续部署）**
-1. 把本目录推到 GitHub 仓库。
-2. Cloudflare 控制台 → **Workers & Pages → 创建 → Pages → 连接到 Git**。
-3. 构建命令：**留空**；**输出目录（Build output directory）：`.`**（点号，根目录）。
-4. 部署完成后，`functions/resolve.js` 会自动成为 `/resolve` 与 `/api/claim` 边缘接口。
+1. 把本目录推到 GitHub 私有仓库。
+2. Cloudflare 控制台 → **Workers & Pages → 创建 → 选择 Worker → 连接到 Git**。
+3. 选中仓库后，构建/部署配置填：
+   - **路径 / 根目录（Root directory）**：`.`（点号）
+   - **部署命令（Deploy command）**：`npx wrangler deploy`
+   - **非生产分支部署命令（Preview deploy command）**：`npx wrangler deploy`
+   - 构建命令：**留空**
+4. 保存并部署。部署完成后：
+   - `index.html` 自动成为首页
+   - `worker.js`（main 入口）接管 `/resolve` 与 `/api/claim` 边缘接口
+   - 其余静态文件由 Worker 的 `assets` 托管
 5. 之后每次 `git push` 自动重新部署。
 
-**方式二：CLI 一条命令**
+**方式二：CLI 一条命令（不连 Git）**
 ```bash
 npm i -g wrangler
 wrangler login
-wrangler pages deploy . --project-name meituan-coupon
+wrangler deploy
 ```
-本地预览：`wrangler pages dev .`；本地 Node 服务：`node server.js`（含 `/resolve`，默认 `http://localhost:8123`）。
+本地预览：`wrangler dev`；本地 Node 服务：`node server.js`（含 `/resolve`，默认 `http://localhost:8123`）。
 
-> `wrangler.toml` 已配置 `pages_build_output_dir = "."`，直接 `wrangler pages deploy .` 即可。
+> 注意：`.assetsignore` 已排除 `worker.js`/`wrangler.toml`/`server.js` 等，避免它们作为站点静态资源被公开。
 
 ## 使用
 

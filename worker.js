@@ -1,6 +1,6 @@
-// Cloudflare Pages Function —— 边缘端跟随重定向解析 poi_id_str
-// 部署：wrangler pages deploy .  本地预览：wrangler pages dev .
-// 路由：/resolve?url=...  与本地 server.js 的 /resolve 完全一致
+// Cloudflare Worker —— 边缘端 /resolve 与 /api/claim，其余请求托管静态资源
+// 部署（Git 连接）：构建/部署命令填 `npx wrangler deploy`，路径填 `.`
+// 本地预览：`npx wrangler dev`（或 `node server.js`）
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -35,32 +35,6 @@ function buildClaim(poi, ver) {
   return base + '?' + params.toString();
 }
 
-export async function onRequest(context) {
-  const { request } = context;
-  const url = new URL(request.url);
-  const path = url.pathname;
-
-  /* 领券链接生成接口（供脚本 / 快捷指令快速调用） */
-  if (path === '/api/claim') {
-    const poi = url.searchParams.get('poi');
-    if (!poi) return json({ ok: false, error: 'missing poi' }, 400);
-    return json({ ok: true, poi, v8: buildClaim(poi, 'v8'), v6: buildClaim(poi, 'v6') });
-  }
-
-  const target = url.searchParams.get('url');
-  if (!target) return json({ ok: false, error: 'missing url' }, 400);
-
-  const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
-  try {
-    const final = await follow(target, ua, 0);
-    const poi = extractPoi(final.url) || extractPoi(final.body);
-    const poiNum = poi ? null : extractPoiNum(final.url) || extractPoiNum(final.body);
-    return json({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: final.url || null });
-  } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) });
-  }
-}
-
 async function follow(u, ua, depth) {
   if (depth > 8) return { url: u, body: '' };
   let r;
@@ -70,7 +44,6 @@ async function follow(u, ua, depth) {
       redirect: 'manual'
     });
   } catch (e) {
-    // 兜底：http 失败尝试 https
     if (u.startsWith('http://')) {
       try {
         r = await fetch(u.replace('http://', 'https://'), {
@@ -80,7 +53,6 @@ async function follow(u, ua, depth) {
     } else throw e;
   }
 
-  // 3xx 重定向 → 继续跟随
   if (r.status >= 300 && r.status < 400) {
     const loc = r.headers.get('location');
     if (loc) {
@@ -90,7 +62,6 @@ async function follow(u, ua, depth) {
   }
 
   const body = await r.text().catch(() => '');
-  // 处理 HTML <meta refresh> 或 JS location 跳转
   const meta = body.match(/http-equiv=["']?refresh["']?[^>]*url=([^"'>\s]+)/i);
   const js = body.match(/location(?:\.href)?\s*=\s*["']([^"']+)["']/i)
     || body.match(/href\s*=\s*["']([^"']*(?:poi_id_str|waimai\.meituan)[^"']*)["']/i);
@@ -113,3 +84,35 @@ function extractPoiNum(s) {
   const m = String(s || '').match(/[?&]poiId=(\d+)/);
   return m ? m[1] : null;
 }
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    /* 领券链接生成接口（供脚本 / 快捷指令快速调用） */
+    if (path === '/api/claim') {
+      const poi = url.searchParams.get('poi');
+      if (!poi) return json({ ok: false, error: 'missing poi' }, 400);
+      return json({ ok: true, poi, v8: buildClaim(poi, 'v8'), v6: buildClaim(poi, 'v6') });
+    }
+
+    /* 短链/直链解析接口（跟随重定向取出 poi_id_str） */
+    if (path === '/resolve') {
+      const target = url.searchParams.get('url');
+      if (!target) return json({ ok: false, error: 'missing url' }, 400);
+      const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+      try {
+        const final = await follow(target, ua, 0);
+        const poi = extractPoi(final.url) || extractPoi(final.body);
+        const poiNum = poi ? null : extractPoiNum(final.url) || extractPoiNum(final.body);
+        return json({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: final.url || null });
+      } catch (e) {
+        return json({ ok: false, error: String((e && e.message) || e) });
+      }
+    }
+
+    /* 其余请求交给静态资源（index.html / app.js / styles.css ...） */
+    return env.ASSETS.fetch(request);
+  }
+};

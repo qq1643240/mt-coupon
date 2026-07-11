@@ -1,0 +1,8 @@
+# 这些文件只用于本地开发 / 部署配置，不应作为站点静态资源公开
+wrangler.toml
+worker.js
+server.js
+README.md
+.gitignore
+node_modules
+functions
