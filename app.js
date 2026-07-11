@@ -139,10 +139,28 @@ function extractName(text) {
   return '';
 }
 // logo 用黑白首字色块（CSS 变量 --logo-bg / --logo-ink），支持自定义图
+// 优先用已缓存到本机的 base64（it.logoData），其次外链 URL，最后首字色块
 function logoHtml(it) {
   const ch = (it.name || '?').trim().charAt(0) || '?';
-  if (it.logo) return `<img class="logo-img" src="${esc(it.logo)}" alt="">`;
+  const src = it.logoData || it.logo;
+  if (src) return `<img class="logo-img" src="${esc(src)}" alt="">`;
   return `<div class="logo-box">${esc(ch)}</div>`;
+}
+// 把头像图片下载转 base64 缓存进本机（离线/换网络也能显示）。
+// 跨域或过大（>3MB）则失败，降级为外链 URL（仍由浏览器 HTTP 缓存兜底）。
+function cacheImage(url) {
+  return new Promise(resolve => {
+    if (!url || !/^https?:\/\//i.test(url)) return resolve(null);
+    try {
+      fetch(url).then(r => { if (!r.ok) throw 0; return r.blob(); }).then(b => {
+        if (b.size > 3 * 1024 * 1024) return resolve(null);
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(b);
+      }).catch(() => resolve(null));
+    } catch (e) { resolve(null); }
+  });
 }
 
 /* ---------- 渲染 ---------- */
@@ -264,7 +282,8 @@ function openEditor(it) {
   openModal();
   $('#saveBtn').addEventListener('click', () => {
     item.name = $('#f_name').value.trim() || '未命名商家';
-    item.logo = $('#f_logo').value.trim();
+    const logoUrl = $('#f_logo').value.trim();
+    item.logo = logoUrl;
     item.amount = $('#f_amount').value.trim();
     item.poi = $('#f_poi').value.trim();
     item.note = $('#f_note').value.trim();
@@ -272,6 +291,15 @@ function openEditor(it) {
     item.updatedAt = Date.now();
     if (!editing) data.push(item);
     save(); render(); closeModal(); toast('已保存');
+    // 头像转为 base64 缓存在本机：离线/换网络也能显示，不依赖外链
+    if (!logoUrl) { delete item.logoData; delete item.logoSrc; save(); }
+    else if (logoUrl !== item.logoSrc) {
+      cacheImage(logoUrl).then(b64 => {
+        item.logoSrc = logoUrl;
+        if (b64) item.logoData = b64; else delete item.logoData;
+        save(); render();
+      });
+    }
   });
   if (editing) $('#delBtn').addEventListener('click', () => { if (confirm(`确认删除「${item.name}」？`)) { data = data.filter(x => x.id !== item.id); save(); render(); closeModal(); toast('已删除'); } });
 }
@@ -363,7 +391,7 @@ async function resolveLink(url) {
   try {
     const r = await fetch('/resolve?url=' + encodeURIComponent(url));
     const j = await r.json().catch(() => ({}));
-    return { poi: (j && j.poi) || null, poiNum: (j && j.poiNum) || null, finalUrl: (j && j.finalUrl) || null, ok: !!(j && j.ok) };
+    return { poi: (j && j.poi) || null, poiNum: (j && j.poiNum) || null, finalUrl: (j && j.finalUrl) || null, logo: (j && j.logo) || null, name: (j && j.name) || null, ok: !!(j && j.ok) };
   } catch (e) { return { poi: null, error: e.message }; }
 }
 
@@ -377,6 +405,15 @@ function autoSave(poi, opts) {
     data.push(it);
   }
   save(); render();
+  // 后端返回的美团店铺头像：自动下载转 base64 缓存到本机（离线/换网络也能显示）
+  if (opts.logo && opts.logo !== it.logoSrc) {
+    cacheImage(opts.logo).then(b64 => {
+      it.logoSrc = opts.logo;
+      if (b64) it.logoData = b64;            // 成功：存成本机 base64
+      else { it.logo = opts.logo; delete it.logoData; } // 跨域失败：降级为外链 URL
+      save(); render();
+    });
+  }
   return it;
 }
 
@@ -393,8 +430,8 @@ async function handleLinkSearch(v) {
     if (!poi) info = await resolveLink(url);
     const resolved = poi || (info && info.poi);
     if (resolved) {
-      const name = extractName(v);
-      const it = autoSave(resolved, { name });
+      const name = extractName(v) || (info && info.name);
+      const it = autoSave(resolved, { name, logo: (info && info.logo) || null });
       toast('已识别并保存：' + it.name);
       openDetail(it);
       return;

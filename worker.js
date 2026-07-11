@@ -84,6 +84,26 @@ function extractPoiNum(s) {
   const m = String(s || '').match(/[?&]poiId=(\d+)/);
   return m ? m[1] : null;
 }
+// 从美团页面提取 og:image / 店招图，作为店铺头像
+function extractLogo(s) {
+  if (!s) return null;
+  let v = extractMeta(s, 'og:image');
+  if (v) return v;
+  const m = s.match(/picUrl["']?\s*:\s*["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i)
+    || s.match(/logoUrl["']?\s*:\s*["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i)
+    || s.match(/headImg["']?\s*:\s*["']([^"']+\.(?:jpg|jpeg|png|webp))["']/i);
+  return m ? m[1] : null;
+}
+function extractMeta(s, prop) {
+  if (!s) return null;
+  let m = s.match(new RegExp('<meta[^>]+property=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
+  if (m) return m[1];
+  m = s.match(new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']?' + prop, 'i'));
+  if (m) return m[1];
+  m = s.match(new RegExp('<meta[^>]+name=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
+  if (m) return m[1];
+  return null;
+}
 
 export default {
   async fetch(request, env) {
@@ -106,7 +126,11 @@ export default {
         const final = await follow(target, ua, 0);
         const poi = extractPoi(final.url) || extractPoi(final.body);
         const poiNum = poi ? null : extractPoiNum(final.url) || extractPoiNum(final.body);
-        return json({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: final.url || null });
+        let logo = null;
+        try { const lv = extractLogo(final.body); if (lv) logo = new URL(lv, final.url).href; } catch (e) {}
+        let name = null;
+        try { const nv = extractMeta(final.body, 'og:title') || extractMeta(final.body, 'title'); if (nv) name = nv.replace(/\s*[-–|]\s*美团.*$/i, '').trim(); } catch (e) {}
+        return json({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: final.url || null, logo: logo || null, name: name || null });
       } catch (e) {
         return json({ ok: false, error: String((e && e.message) || e) });
       }
