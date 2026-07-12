@@ -301,8 +301,19 @@ http.createServer((req, res) => {
       if (err) { res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: err.message })); return; }
       const poi = extractPoi(finalUrl) || extractPoi(body);
       const poiNum = poi ? null : extractPoiNum(finalUrl) || extractPoiNum(body);
+      // 解析店铺头像与店名（供前端「读剪贴板领券」时自动保存商家信息到卡片）
+      let logo = null;
+      try { const lv = extractLogo(body); if (lv) logo = new URL(lv, finalUrl).href; } catch (e) {}
+      let name = null;
+      try {
+        let nv = extractMeta(body, 'og:title') || extractMeta(body, 'twitter:title');
+        if (!nv) { const tm = body.match(/<title>([^<]+)<\/title>/i); nv = tm ? tm[1].trim() : null; }
+        if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券|美团网).*$/i, '').replace(/^\s+|\s+$/g, '');
+        if (name) name = name.replace(/\s*[-–|]\s*(在线点餐|配送中|正在营业|已打烊|美团外卖|外卖|优惠|团购).*/i, '').trim();
+        if (name && (/^(美团|大众点评|美团外卖|Meituan|Dianping)$/.test(name) || name.length < 2)) name = null;
+      } catch (e) {}
       res.writeHead(200, { 'Content-Type': types['.json'] });
-      res.end(JSON.stringify({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: finalUrl || null }));
+      res.end(JSON.stringify({ ok: !!poi, poi: poi || null, poiNum: poiNum || null, finalUrl: finalUrl || null, logo: logo || null, name: name || null }));
     });
     return;
   }

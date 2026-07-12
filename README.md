@@ -42,9 +42,11 @@
 5. 用法：在微信里长按美团分享消息 → 转发/分享 → 选「美团领券」→ 直接跳 App。
 
 **方案 C：本站一键按钮（无需快捷指令）**
-站点顶部新增「📋 读剪贴板 · 直跳美团 App 领券」按钮：复制美团分享链接后点一下，自动
-读取剪贴板 → `/resolve` 解析 `poi_id_str` → `location.href` 跳 `imeituan://www.meituan.com/web?url=<领券页>` 唤起 App。
-按钮右侧可切 **v8 主券 / v6 第二张**；领券成功会自动标记已领并累加统计。
+站点顶部「📋 读剪贴板 · 直跳美团 App 领券」按钮：复制美团分享链接后点一下，自动
+读取剪贴板 → `/resolve` 解析 `poi_id_str` 与店名/头像 → `location.href` 跳 `imeituan://www.meituan.com/web?url=<领券页>` 唤起 App。
+**领券的同时会自动把该商家保存到下方卡片（含店名/头像），并标记已领、累加统计。**
+按钮右侧可切 **v8 主券 / v6 第二张**。
+> ⚠️ 剪贴板自动读取需 **HTTPS 或 localhost** 安全上下文。宝塔用 `http://服务器IP:端口` 访问时浏览器禁止自动读剪贴板，此时按钮会**弹窗让你手动粘贴**链接（功能等效，不影响使用）。
 
 **方案 E：把按钮变成一条链接 / 快捷指令（`?jkclip`，最懒人）**
 不想在快捷指令里拼剪贴板文本？直接用这条链接，打开后**页面自己读剪贴板**并跳 App，等价于点首页按钮：
@@ -74,10 +76,10 @@
   "v6": "https://offsiteact.meituan.com/...v6..." }
 ```
 
-`GET /resolve?url=<分享链接>` 跟随重定向解析出 `poi_id_str`：
+`GET /resolve?url=<分享链接>` 跟随重定向解析出 `poi_id_str`（同时返回店名与头像，供读剪贴板领券时自动收藏）：
 
 ```json
-{ "ok": true, "poi": "7FATrlwYZgjK0Wo13H0zOAI", "finalUrl": "..." }
+{ "ok": true, "poi": "7FATrlwYZgjK0Wo13H0zOAI", "finalUrl": "...", "logo": "https://...", "name": "旺角大排档（粤菜小炒）" }
 ```
 
 ## 一键部署到 Cloudflare（Worker + 静态资源）

@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.36'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.37'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -843,10 +843,19 @@ function imeituanDeepLink(poi, ver) {
   const activityUrl = buildUrl(poi, ver); // offsiteact.meituan.com H5 领券页
   return 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
 }
+/* 读取剪贴板文本：安全上下文（HTTPS/localhost）优先用 Clipboard API；
+   非安全上下文（如 http://IP:端口 的宝塔部署）Clipboard API 不可用，降级为手动粘贴 */
+async function getClipboardText() {
+  if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
+    try { const t = await navigator.clipboard.readText(); if (t && t.trim()) return t; } catch (e) {}
+  }
+  // 宝塔 HTTP 等不安全环境：弹窗让用户粘贴（Ctrl+V 即可），功能等效
+  return window.prompt('当前站点无法自动读取剪贴板（需 HTTPS 或 localhost）。\n请粘贴美团分享链接后点「确定」：') || '';
+}
+
 async function quickJumpFromClipboard() {
-  let text = '';
-  try { text = await navigator.clipboard.readText(); } catch (e) {}
-  if (!text) { toast('剪贴板为空或无法读取，请先复制美团分享链接'); return; }
+  const text = await getClipboardText();
+  if (!text || !text.trim()) { toast('未获取到链接，请先复制美团分享链接'); return; }
   const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
   if (!um) { toast('剪贴板里没有美团链接'); return; }
   toast('正在解析店铺…');
@@ -854,12 +863,14 @@ async function quickJumpFromClipboard() {
     const r = await fetch('/resolve?url=' + encodeURIComponent(um[0]));
     const info = await r.json().catch(() => ({}));
     if (info && info.poi) {
-      const it = data.find(d => d.poi === info.poi);
-      if (it) { it.claimed = true; it.updatedAt = Date.now(); }
+      // 领券同时自动保存商家信息到下方卡片（含店名/头像），便于以后一键复领
+      const name = (info.name && isValidShopName(info.name)) ? info.name : extractName(text);
+      const it = autoSave(info.poi, { name, logo: info.logo || null });
+      it.claimed = true; it.updatedAt = Date.now();
       bumpStat(qjVer === 'v6' ? 2 : 1);
       save(); render();
       location.href = imeituanDeepLink(info.poi, qjVer); // 直接唤起美团 App（iOS 弹确认框）
-      toast('已唤起美团 App（' + (qjVer === 'v6' ? 'v6' : 'v8') + '）');
+      toast('已收藏并唤起美团 App（' + (qjVer === 'v6' ? 'v6' : 'v8') + '）');
     } else if (info && info.poiNum) {
       toast('该链接只含数字店铺ID，无 poi_id_str，无法直跳');
     } else {
