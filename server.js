@@ -19,6 +19,12 @@ function str(v, n) { return String(v == null ? '' : v).slice(0, n); }
 /* ---- 后台登录令牌（内存，重启失效；个人自用足够）---- */
 const adminTokens = new Set();
 const ADMIN_PASS = process.env.ADMIN_PASS || 'mt6866admin';
+const adminFile = path.join(dataDir, 'admin.json');
+function readAdminPass() {
+  try { const o = JSON.parse(fs.readFileSync(adminFile, 'utf8')); if (o && o.pass) return o.pass; } catch (e) {}
+  return ADMIN_PASS;
+}
+function writeAdminPass(p) { try { fs.writeFileSync(adminFile, JSON.stringify({ pass: p })); } catch (e) {} }
 function genToken() { return crypto.randomBytes(24).toString('hex'); }
 function readBody(req) {
   return new Promise(resolve => {
@@ -339,7 +345,7 @@ http.createServer((req, res) => {
   if (u.pathname === '/admin/login' && req.method === 'POST') {
     readBody(req).then(body => {
       let obj; try { obj = JSON.parse(body || '{}'); } catch (e) { obj = {}; }
-      if (obj.pass === ADMIN_PASS) {
+      if (obj.pass === readAdminPass()) {
         const tk = genToken(); adminTokens.add(tk);
         res.setHeader('Set-Cookie', 'admin_token=' + tk + '; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax');
         res.writeHead(200, { 'Content-Type': types['.json'] });
@@ -348,6 +354,55 @@ http.createServer((req, res) => {
         res.writeHead(403, { 'Content-Type': types['.json'] });
         res.end(JSON.stringify({ ok: false, error: '密码错误' }));
       }
+    });
+    return;
+  }
+
+  /* ---- 修改管理员密码（需登录）---- */
+  if (u.pathname === '/admin/changepass' && req.method === 'POST') {
+    if (!authOk(req)) { res.writeHead(401, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: '未授权：请先登录' })); return; }
+    readBody(req).then(body => {
+      let obj; try { obj = JSON.parse(body || '{}'); } catch (e) { obj = {}; }
+      if (obj.current !== readAdminPass()) { res.writeHead(403, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: '当前密码错误' })); return; }
+      if (!obj.next || String(obj.next).length < 4) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: '新密码至少 4 位' })); return; }
+      writeAdminPass(String(obj.next));
+      res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+
+  /* ---- 链接导入：分析链接内容，返回标题/描述/地名/经纬度，供后台自动填充 ---- */
+  if (u.pathname === '/api/import') {
+    const target = u.searchParams.get('url');
+    if (!target) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'missing url' })); return; }
+    follow(target, 0, (err, finalUrl, body) => {
+      if (err) { res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: err.message })); return; }
+      let title = extractMeta(body, 'og:title') || extractMeta(body, 'twitter:title');
+      if (!title) { const tm = body.match(/<title>([^<]+)<\/title>/i); title = tm ? tm[1].trim() : null; }
+      let desc = extractMeta(body, 'og:description') || extractMeta(body, 'description') || '';
+      let lat = null, lng = null, place = null;
+      try {
+        const u2 = new URL(finalUrl);
+        const q = u2.searchParams;
+        lat = q.get('lat') || q.get('latitude') || q.get('y');
+        lng = q.get('lng') || q.get('longitude') || q.get('x');
+        place = q.get('name') || q.get('title') || q.get('poiName') || q.get('place') || q.get('addr');
+      } catch (e) {}
+      if (!lat || !lng) {
+        const m = (body || '').match(/(?:lat|latitude|y)\s*[:=]\s*([-\d.]+)/i);
+        const m2 = (body || '').match(/(?:lng|longitude|x)\s*[:=]\s*([-\d.]+)/i);
+        if (m) lat = lat || m[1];
+        if (m2) lng = lng || m2[1];
+      }
+      res.writeHead(200, { 'Content-Type': types['.json'] });
+      res.end(JSON.stringify({
+        ok: true,
+        title: title || null,
+        note: desc ? String(desc).slice(0, 500) : null,
+        place: place || title || null,
+        lat: lat || null, lng: lng || null,
+        finalUrl: finalUrl || null
+      }));
     });
     return;
   }

@@ -70,9 +70,10 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
   const login = await req('POST', '/admin/login', JSON.stringify({ pass: 'mt6866admin' }));
   const lj = JSON.parse(login.body);
+  let token = '';
   if (!lj.ok || !lj.token) { console.log('[FAIL] 后台登录失败：', login.body); fail++; }
   else {
-    const token = lj.token;
+    token = lj.token;
     const add = await req('POST', '/api/acts', JSON.stringify({ title: '周三外卖节', url: 'https://activity.example.com/a', note: '满30减12' }), token);
     const aj = JSON.parse(add.body);
     if (!aj.ok || !aj.item || !aj.item.id) { console.log('[FAIL] 添加活动失败：', add.body); fail++; }
@@ -92,6 +93,26 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       else console.log('[PASS] 删除活动成功');
     }
   }
+
+  // 6) 修改管理员密码：改密后新密码可登录、旧密码失效，最后还原默认避免影响本地数据
+  const chg = await req('POST', '/admin/changepass', JSON.stringify({ current: 'mt6866admin', next: 'newpass123' }), token);
+  const chgj = JSON.parse(chg.body);
+  if (!chgj.ok) { console.log('[FAIL] 修改密码失败：', chg.body); fail++; }
+  else {
+    console.log('[PASS] 修改密码成功');
+    const loginNew = await req('POST', '/admin/login', JSON.stringify({ pass: 'newpass123' }));
+    const lnj = JSON.parse(loginNew.body);
+    if (!lnj.ok) { console.log('[FAIL] 新密码登录失败'); fail++; } else console.log('[PASS] 新密码可登录');
+    const loginOld = await req('POST', '/admin/login', JSON.stringify({ pass: 'mt6866admin' }));
+    if (JSON.parse(loginOld.body).ok) { console.log('[FAIL] 旧密码仍可登录'); fail++; } else console.log('[PASS] 旧密码已失效');
+    await req('POST', '/admin/changepass', JSON.stringify({ current: 'newpass123', next: 'mt6866admin' }), lnj.token);
+  }
+
+  // 7) 链接导入：不可达地址应优雅返回 JSON 而非崩溃
+  const imp = await req('GET', '/api/import?url=' + encodeURIComponent('http://127.0.0.1:1/x'));
+  const impj = JSON.parse(imp.body || '{}');
+  if (typeof impj.ok === 'undefined') { console.log('[FAIL] /api/import 返回异常：', imp.body); fail++; }
+  else console.log('[PASS] /api/import 容错返回（ok=' + impj.ok + '）');
 
   srv.kill();
   console.log(fail ? '\n=== 服务端测试有失败 ===' : '\n=== 服务端测试全部通过 ===');

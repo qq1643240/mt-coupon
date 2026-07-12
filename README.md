@@ -19,8 +19,9 @@
 
 领券页与分享膨胀定位页的内容由**服务端后台**统一管理（前端只展示 + 点击）：
 
-- 打开 `/admin` → 输入密码登录（密码取环境变量 **`ADMIN_PASS`**，默认 `mt6866admin`）。
+- 打开 `/admin` → 输入密码登录（密码取环境变量 **`ADMIN_PASS`**，默认 `mt6866admin`；登录后可在「修改管理员密码」处修改，新密码写入 `data/admin.json`，重启仍生效）。
 - 在后台添加 / 编辑 / 删除「活动链接」与「定位点」，保存即生效，前端页面自动读取。
+- **链接导入**：在领券 / 定位分区粘贴任意链接，点「解析」即可自动抓取标题/描述或地名/经纬度并填入表单（后端 `GET /api/import?url=` 解析）。
 - 数据存于服务端 `data/acts.json`、`data/locs.json`（已加入 `.gitignore`，勿提交）。
 - 接口（GET 公开可读；POST/PUT/DELETE 需登录令牌）：
   - `GET /api/acts`、`POST /api/acts`、`PUT /api/acts/:id`、`DELETE /api/acts/:id`

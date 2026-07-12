@@ -39,10 +39,22 @@
 
   <div id="adminBox" class="hidden">
     <h1>后台管理 · 美团津贴</h1>
-    <p class="sub">活动链接与定位点会展示在前端「领券」「分享膨胀定位」页面</p>
+    <p class="sub">活动链接与定位点会展示在前端「领券」「定位」页面</p>
 
     <div class="card">
-      <div class="sec-t">领券 · 活动链接</div>
+      <div class="sec-t">修改管理员密码</div>
+      <label>当前密码</label>
+      <input id="curPass" type="password" placeholder="当前密码" />
+      <label>新密码（至少 4 位）</label>
+      <input id="newPass" type="password" placeholder="新密码" />
+      <button class="btn-primary" id="chgPass" style="margin-top:12px">修改密码</button>
+      <p class="tip" id="chgTip"></p>
+    </div>
+
+    <div class="card">
+      <div class="sec-t">领券</div>
+      <label>从链接导入（自动识别标题/描述，可选）</label>
+      <div class="row"><input id="actImport" placeholder="粘贴活动/商品链接" /><button class="btn-ghost" id="actParse" type="button">解析</button></div>
       <label>标题</label>
       <input id="actTitle" placeholder="如：周三外卖节 满30减12" />
       <label>活动链接（点击即跳转领取）</label>
@@ -54,7 +66,9 @@
     </div>
 
     <div class="card">
-      <div class="sec-t">分享膨胀定位 · 定位点</div>
+      <div class="sec-t">定位</div>
+      <label>从链接导入（自动识别地名/经纬度，可选）</label>
+      <div class="row"><input id="locImport" placeholder="粘贴定位/地图分享链接" /><button class="btn-ghost" id="locParse" type="button">解析</button></div>
       <div class="row">
         <div><label>地名</label><input id="locPlace" placeholder="如：深圳南山科技园" /></div>
         <div><label>纬度 lat</label><input id="locLat" placeholder="22.53" /></div>
@@ -133,6 +147,37 @@ document.getElementById('locAdd').onclick = function () {
   if (!body.place) { alert('请填写地名'); return; }
   var p = window.__editLoc ? api('PUT', '/api/locs/' + window.__editLoc, body) : api('POST', '/api/locs', body);
   p.then(function () { window.__editLoc = null; document.getElementById('locPlace').value = ''; document.getElementById('locLat').value = ''; document.getElementById('locLng').value = ''; document.getElementById('locNote').value = ''; loadLocs(); });
+};
+document.getElementById('actParse').onclick = function () {
+  var url = document.getElementById('actImport').value.trim();
+  if (!url) { alert('请粘贴链接'); return; }
+  api('GET', '/api/import?url=' + encodeURIComponent(url)).then(function (j) {
+    if (j && j.ok) {
+      if (j.title) document.getElementById('actTitle').value = j.title;
+      if (j.note) document.getElementById('actNote').value = j.note;
+      if (!document.getElementById('actUrl').value) document.getElementById('actUrl').value = url;
+    } else alert('解析失败：' + ((j && j.error) || ''));
+  });
+};
+document.getElementById('locParse').onclick = function () {
+  var url = document.getElementById('locImport').value.trim();
+  if (!url) { alert('请粘贴链接'); return; }
+  api('GET', '/api/import?url=' + encodeURIComponent(url)).then(function (j) {
+    if (j && j.ok) {
+      if (j.place) document.getElementById('locPlace').value = j.place;
+      if (j.lat) document.getElementById('locLat').value = j.lat;
+      if (j.lng) document.getElementById('locLng').value = j.lng;
+      if (j.note) document.getElementById('locNote').value = j.note;
+    } else alert('解析失败：' + ((j && j.error) || ''));
+  });
+};
+document.getElementById('chgPass').onclick = function () {
+  var cur = document.getElementById('curPass').value, nw = document.getElementById('newPass').value;
+  if (nw.length < 4) { document.getElementById('chgTip').textContent = '新密码至少 4 位'; return; }
+  api('POST', '/admin/changepass', { current: cur, next: nw }).then(function (j) {
+    document.getElementById('chgTip').textContent = j.ok ? '密码已修改，下次登录用新密码' : (j.error || '失败');
+    if (j.ok) { document.getElementById('curPass').value = ''; document.getElementById('newPass').value = ''; }
+  });
 };
 </script>
 </body>

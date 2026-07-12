@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.42'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.43'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -567,14 +567,21 @@ function moveSegInd() {
   const i = segBtns.findIndex(b => b.classList.contains('active'));
   $('#segInd').style.transform = `translateX(${i * 100}%)`;
 }
+function applyPageChrome() {
+  // 「读剪贴板直跳 / v8·v6」控件只在津贴（商家）页有意义，领券/定位页隐藏
+  const qj = document.getElementById('quickjump');
+  if (qj) qj.classList.toggle('hidden', curPage !== 'shop');
+}
 segBtns.forEach((b, i) => b.addEventListener('click', async () => {
   segBtns.forEach(x => x.classList.remove('active'));
   b.classList.add('active'); curPage = b.dataset.page; moveSegInd();
   if (curPage === 'claim') await loadActs();
   else if (curPage === 'loc') await loadLocs();
+  applyPageChrome();
   render();
 }));
 moveSegInd();
+applyPageChrome();
 
 /* ---------- 使用说明折叠 ---------- */
 $('#helpToggle').addEventListener('click', () => {

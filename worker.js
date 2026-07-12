@@ -438,7 +438,7 @@ export default {
 
     /* ===== 后台管理（需绑定 ADMIN_KV + 设置 ADMIN_PASS）===== */
     const kv = env.ADMIN_KV;
-    const ADMIN_PASS_W = env.ADMIN_PASS || 'mt6866admin';
+    async function readAdminPassW() { const p = kv ? await kv.get('admin_pass') : null; return p || env.ADMIN_PASS || 'mt6866admin'; }
     async function admAuth(request) {
       const h = request.headers.get('authorization') || '';
       const m = h.match(/^Bearer\s+(.+)$/i);
@@ -452,7 +452,7 @@ export default {
 
     if (path === '/admin/login' && request.method === 'POST') {
       let obj = {}; try { obj = await request.json(); } catch {}
-      if (obj.pass === ADMIN_PASS_W) {
+      if (obj.pass === await readAdminPassW()) {
         if (!kv) return json({ ok: false, error: '云端未配置 ADMIN_KV，请使用宝塔版后台' }, 501);
         const tk = crypto.randomUUID();
         await kv.put('tok:' + tk, '1', { expirationTtl: 86400 });
@@ -463,6 +463,42 @@ export default {
         });
       }
       return json({ ok: false, error: '密码错误' }, 403);
+    }
+
+    /* 修改管理员密码（需登录） */
+    if (path === '/admin/changepass' && request.method === 'POST') {
+      if (!await admAuth(request)) return json({ ok: false, error: '未授权：请先登录' }, 401);
+      let obj = {}; try { obj = await request.json(); } catch {}
+      if (obj.current !== await readAdminPassW()) return json({ ok: false, error: '当前密码错误' }, 403);
+      if (!obj.next || String(obj.next).length < 4) return json({ ok: false, error: '新密码至少 4 位' }, 400);
+      if (kv) await kv.put('admin_pass', String(obj.next));
+      return json({ ok: true });
+    }
+
+    /* 链接导入：分析链接内容，返回标题/描述/地名/经纬度 */
+    if (path === '/api/import') {
+      const target = url.searchParams.get('url');
+      if (!target) return json({ ok: false, error: 'missing url' }, 400);
+      const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
+      try {
+        const final = await follow(target, ua, 0);
+        let title = extractMeta(final.body, 'og:title') || extractMeta(final.body, 'twitter:title');
+        if (!title) { const tm = final.body.match(/<title>([^<]+)<\/title>/i); title = tm ? tm[1].trim() : null; }
+        let desc = extractMeta(final.body, 'og:description') || extractMeta(final.body, 'description') || '';
+        let lat = null, lng = null, place = null;
+        try {
+          const u2 = new URL(final.url); const q = u2.searchParams;
+          lat = q.get('lat') || q.get('latitude') || q.get('y');
+          lng = q.get('lng') || q.get('longitude') || q.get('x');
+          place = q.get('name') || q.get('title') || q.get('poiName') || q.get('place') || q.get('addr');
+        } catch (e) {}
+        if (!lat || !lng) {
+          const m = (final.body || '').match(/(?:lat|latitude|y)\s*[:=]\s*([-\d.]+)/i);
+          const m2 = (final.body || '').match(/(?:lng|longitude|x)\s*[:=]\s*([-\d.]+)/i);
+          if (m) lat = lat || m[1]; if (m2) lng = lng || m2[1];
+        }
+        return json({ ok: true, title: title || null, note: desc ? String(desc).slice(0, 500) : null, place: place || title || null, lat: lat || null, lng: lng || null, finalUrl: final.url || null });
+      } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }); }
     }
 
     if (path.startsWith('/api/acts') || path.startsWith('/api/locs')) {
