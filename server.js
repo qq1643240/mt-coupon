@@ -28,8 +28,10 @@ function writeAdminPass(p) { try { fs.writeFileSync(adminFile, JSON.stringify({ 
 function genToken() { return crypto.randomBytes(24).toString('hex'); }
 function readBody(req) {
   return new Promise(resolve => {
-    let b = ''; req.on('data', c => { b += c; if (b.length > 2 * 1024 * 1024) req.destroy(); });
-    req.on('end', () => resolve(b)); req.on('error', () => resolve(''));
+    const chunks = []; let size = 0;
+    req.on('data', c => { chunks.push(c); size += c.length; if (size > 2 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(''));
   });
 }
 function authOk(req) {
@@ -328,6 +330,37 @@ function extractMeta(s, prop) {
   return null;
 }
 
+/* 从纯文字中识别坐标/地名/活动信息（图片识别也先 OCR 成文字再走这里） */
+function analyzeText(text) {
+  const s = String(text || '');
+  const out = { title: null, note: null, place: null, lat: null, lng: null, poi: null, urls: [] };
+  const urlRe = /https?:\/\/[^\s"'<>）)\]]+/gi;
+  let m; const urls = [];
+  while ((m = urlRe.exec(s))) urls.push(m[0]);
+  out.urls = urls;
+  const poiM = s.match(/poi_id_str=([^&\s"'<>\\]+)/);
+  if (poiM) out.poi = decodeURIComponent(poiM[1]);
+  const latM = s.match(/(?:纬度|latitude|lat)\s*[:：=]?\s*([-\d.]+)/i);
+  const lngM = s.match(/(?:经度|longitude|lng)\s*[:：=]?\s*([-\d.]+)/i);
+  if (latM) out.lat = latM[1];
+  if (lngM) out.lng = lngM[1];
+  if (!out.lat && !out.lng) {
+    const pair = s.match(/([\d.]{1,3}\.\d+)\s*[°,，]\s*([\d.]{1,3}\.\d+)/);
+    if (pair) { out.lat = pair[1]; out.lng = pair[2]; }
+  }
+  const placeM = s.match(/([\u4e00-\u9fa5A-Za-z0-9（）()·\-—\s]{2,30}?(?:路|区|县|市|店|商场|广场|大厦|园区|镇|村|大道|街|中心|公寓|小区|馆|城|园|站|湾|港|苑|寓))/);
+  if (placeM) out.place = placeM[1].trim();
+  const qM = s.match(/[「『"']([^」』"']{2,40})[」』"']/);
+  if (qM) out.title = qM[1].trim();
+  const mj = s.match(/满\s*(\d+)\s*减\s*(\d+)/);
+  if (mj) out.note = (out.note ? out.note + ' ' : '') + ('满' + mj[1] + '减' + mj[2]);
+  if (!out.title) {
+    const lines = s.split(/[\n\r]+/).map(x => x.trim()).filter(Boolean);
+    if (lines[0]) out.title = lines[0].slice(0, 200);
+  }
+  return out;
+}
+
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost:' + port);
 
@@ -404,6 +437,30 @@ http.createServer((req, res) => {
         finalUrl: finalUrl || null
       }));
     });
+    return;
+  }
+
+  /* ---- 智能识别：文字 / 图片OCR结果 → 解析坐标/地名/活动/内嵌链接（纯本地，无需联网）---- */
+  if (u.pathname === '/api/analyze') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (req.method === 'GET') {
+      const text = u.searchParams.get('text') || '';
+      const r = analyzeText(text);
+      res.writeHead(200, { 'Content-Type': types['.json'] });
+      res.end(JSON.stringify({ ok: true, ...r }));
+      return;
+    }
+    if (req.method === 'POST') {
+      readBody(req).then(body => {
+        let obj; try { obj = JSON.parse(body || '{}'); } catch (e) { obj = {}; }
+        const r = analyzeText(obj.text || '');
+        res.writeHead(200, { 'Content-Type': types['.json'] });
+        res.end(JSON.stringify({ ok: true, ...r }));
+      });
+      return;
+    }
+    res.writeHead(405, { 'Content-Type': types['.json'] });
+    res.end(JSON.stringify({ ok: false, error: 'method not allowed' }));
     return;
   }
 
@@ -603,9 +660,10 @@ http.createServer((req, res) => {
       return;
     }
     // POST：上传覆盖
-    let body = '';
-    req.on('data', c => { body += c; if (body.length > 5 * 1024 * 1024) req.destroy(); });
+    const sChunks = []; let sSize = 0;
+    req.on('data', c => { sChunks.push(c); sSize += c.length; if (sSize > 5 * 1024 * 1024) req.destroy(); });
     req.on('end', () => {
+      const body = Buffer.concat(sChunks).toString('utf8');
       let arr; try { arr = JSON.parse(body); } catch (e) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'invalid json' })); return; }
       if (!Array.isArray(arr)) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'data must be array' })); return; }
       try { fs.writeFileSync(fp, JSON.stringify(arr)); } catch (e) { res.writeHead(500, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'write failed' })); return; }

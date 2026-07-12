@@ -184,6 +184,37 @@ function extractMeta(s, prop) {
   return null;
 }
 
+/* 从纯文字中识别坐标/地名/活动信息（图片识别也先 OCR 成文字再走这里） */
+function analyzeText(text) {
+  const s = String(text || '');
+  const out = { title: null, note: null, place: null, lat: null, lng: null, poi: null, urls: [] };
+  const urlRe = /https?:\/\/[^\s"'<>）)\]]+/gi;
+  let m; const urls = [];
+  while ((m = urlRe.exec(s))) urls.push(m[0]);
+  out.urls = urls;
+  const poiM = s.match(/poi_id_str=([^&\s"'<>\\]+)/);
+  if (poiM) out.poi = decodeURIComponent(poiM[1]);
+  const latM = s.match(/(?:纬度|latitude|lat)\s*[:：=]?\s*([-\d.]+)/i);
+  const lngM = s.match(/(?:经度|longitude|lng)\s*[:：=]?\s*([-\d.]+)/i);
+  if (latM) out.lat = latM[1];
+  if (lngM) out.lng = lngM[1];
+  if (!out.lat && !out.lng) {
+    const pair = s.match(/([\d.]{1,3}\.\d+)\s*[°,，]\s*([\d.]{1,3}\.\d+)/);
+    if (pair) { out.lat = pair[1]; out.lng = pair[2]; }
+  }
+  const placeM = s.match(/([\u4e00-\u9fa5A-Za-z0-9（）()·\-—\s]{2,30}?(?:路|区|县|市|店|商场|广场|大厦|园区|镇|村|大道|街|中心|公寓|小区|馆|城|园|站|湾|港|苑|寓))/);
+  if (placeM) out.place = placeM[1].trim();
+  const qM = s.match(/[「『"']([^」』"']{2,40})[」』"']/);
+  if (qM) out.title = qM[1].trim();
+  const mj = s.match(/满\s*(\d+)\s*减\s*(\d+)/);
+  if (mj) out.note = (out.note ? out.note + ' ' : '') + ('满' + mj[1] + '减' + mj[2]);
+  if (!out.title) {
+    const lines = s.split(/[\n\r]+/).map(x => x.trim()).filter(Boolean);
+    if (lines[0]) out.title = lines[0].slice(0, 200);
+  }
+  return out;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -499,6 +530,19 @@ export default {
         }
         return json({ ok: true, title: title || null, note: desc ? String(desc).slice(0, 500) : null, place: place || title || null, lat: lat || null, lng: lng || null, finalUrl: final.url || null });
       } catch (e) { return json({ ok: false, error: String((e && e.message) || e) }); }
+    }
+
+    /* 智能识别：文字 / 图片OCR结果 → 解析坐标/地名/活动/内嵌链接（纯本地，无需联网） */
+    if (path === '/api/analyze') {
+      if (request.method === 'GET') {
+        const text = url.searchParams.get('text') || '';
+        return json({ ok: true, ...analyzeText(text) });
+      }
+      if (request.method === 'POST') {
+        let obj = {}; try { obj = await request.json(); } catch {}
+        return json({ ok: true, ...analyzeText(obj.text || '') });
+      }
+      return json({ ok: false, error: 'method not allowed' }, 405);
     }
 
     if (path.startsWith('/api/acts') || path.startsWith('/api/locs')) {

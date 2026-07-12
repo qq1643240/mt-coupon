@@ -114,6 +114,19 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   if (typeof impj.ok === 'undefined') { console.log('[FAIL] /api/import 返回异常：', imp.body); fail++; }
   else console.log('[PASS] /api/import 容错返回（ok=' + impj.ok + '）');
 
+  // 8) 智能识别 /api/analyze：纯文字解析坐标/地名/满减/内嵌链接（无需联网）
+  const az = await req('POST', '/api/analyze', JSON.stringify({ text: '深圳南山科技园 纬度22.5312 经度113.9456' }));
+  const azj = JSON.parse(az.body || '{}');
+  if (!(azj.ok && azj.lat === '22.5312' && azj.lng === '113.9456' && /科技园/.test(azj.place || ''))) {
+    console.log('[FAIL] /api/analyze 坐标解析异常：', az.body); fail++;
+  } else console.log('[PASS] /api/analyze 识别出 地名/纬度/经度（' + azj.place + ' ' + azj.lat + ',' + azj.lng + '）');
+
+  const az2 = await req('GET', '/api/analyze?text=' + encodeURIComponent('「肯德基宅急送」满30减12 https://dpurl.cn/abc123'));
+  const azj2 = JSON.parse(az2.body || '{}');
+  if (!(azj2.ok && azj2.title === '肯德基宅急送' && /满30减12/.test(azj2.note || '') && Array.isArray(azj2.urls) && azj2.urls[0].indexOf('https://dpurl.cn') === 0)) {
+    console.log('[FAIL] /api/analyze 活动话术解析异常：', az2.body); fail++;
+  } else console.log('[PASS] /api/analyze 识别出 标题/满减/链接（' + azj2.title + ' ' + azj2.note + '）');
+
   srv.kill();
   console.log(fail ? '\n=== 服务端测试有失败 ===' : '\n=== 服务端测试全部通过 ===');
   process.exit(fail ? 1 : 0);
