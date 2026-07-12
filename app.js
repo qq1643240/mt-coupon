@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.39'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.40'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -511,6 +511,45 @@ function exportData() { const b = new Blob([JSON.stringify(data, null, 2)], { ty
 function importData() { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json'; inp.onchange = () => { const f = inp.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const arr = JSON.parse(r.result); if (Array.isArray(arr)) { data = arr; save(); render(); toast('导入成功'); } else toast('格式不正确'); } catch { toast('解析失败'); } }; r.readAsText(f); }; inp.click(); }
 function clearAll() { if (confirm('确认清空全部收藏？')) { data = []; save(); render(); toast('已清空'); } }
 
+/* ---------- 跨设备同步（需宝塔版后端 /sync；云端 worker 暂不支持） ---------- */
+const SYNC_KEY = 'mt_coupon_sync_key';
+function getSyncKey() {
+  let k = '';
+  try { k = localStorage.getItem(SYNC_KEY) || ''; } catch (e) {}
+  if (!k) { k = uid().slice(0, 12); try { localStorage.setItem(SYNC_KEY, k); } catch (e) {} }
+  return k;
+}
+async function syncUpload() {
+  const key = getSyncKey();
+  if (!confirm('将把本机 ' + data.length + ' 个收藏上传并覆盖云端（同步码：' + key + '）。继续？')) return;
+  try {
+    const r = await fetch('/sync?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), cache: 'no-store' });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.ok) toast('已上传同步（' + data.length + ' 个）');
+    else toast('上传失败：' + (j && j.error || '未知'));
+  } catch (e) { toast('同步失败：当前后端可能不支持（请用宝塔版）'); }
+}
+async function syncDownload() {
+  const key = getSyncKey();
+  try {
+    const r = await fetch('/sync?key=' + encodeURIComponent(key), { cache: 'no-store' });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.ok && Array.isArray(j.data)) {
+      if (!confirm('将用云端 ' + j.data.length + ' 个收藏覆盖本机。继续？')) return;
+      data = j.data; save(); render(); toast('已下载同步（' + data.length + ' 个）');
+    } else if (j && j.ok && !j.data) {
+      toast('云端暂无数据，请先上传');
+    } else {
+      toast('下载失败：' + (j && j.error || '未知'));
+    }
+  } catch (e) { toast('同步失败：当前后端可能不支持（请用宝塔版）'); }
+}
+function setSyncKey() {
+  const cur = getSyncKey();
+  const v = window.prompt('设置同步码（跨设备保持一致即可共享数据）：', cur);
+  if (v && v.trim()) { try { localStorage.setItem(SYNC_KEY, v.trim()); } catch (e) {} toast('同步码已设为：' + v.trim()); }
+}
+
 /* ---------- 深色模式 ---------- */
 function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); localStorage.setItem(THEME_KEY, t); }
 function toggleTheme() { const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; applyTheme(cur); toast(cur === 'dark' ? '已切换深色' : '已切换浅色'); }
@@ -668,6 +707,9 @@ const COMMANDS = [
   { icon: ICON.open, label: 'API 调用说明', desc: '接口地址与用途', run: showApiDocs },
   { icon: ICON.save, label: '导出数据', desc: '下载 JSON 备份', run: exportData },
   { icon: ICON.import, label: '导入数据', desc: '从 JSON 恢复', run: importData },
+  { icon: ICON.bolt, label: '上传同步（本机→云端）', desc: '推送到同步服务器', run: syncUpload },
+  { icon: ICON.open, label: '下载同步（云端→本机）', desc: '从同步服务器拉取', run: syncDownload },
+  { icon: ICON.edit, label: '设置同步码', desc: '跨设备共用标识', run: setSyncKey },
   { icon: ICON.trashAll, label: '清空全部', desc: '删除所有收藏', run: clearAll }
 ];
 
@@ -914,3 +956,17 @@ injectIcons();
 const _fv = document.getElementById('footVer'); if (_fv) _fv.textContent = 'v' + VERSION;
 render();
 handleDeepLink();
+
+/* 版本更新提示：配合 index.html 的 app.js?v= 指纹，解决「部署了但用户看到旧版」 */
+(function checkVersionUpdate() {
+  const k = 'mt_coupon_version';
+  let prev = '';
+  try { prev = localStorage.getItem(k) || ''; } catch (e) {}
+  if (prev && prev !== VERSION) {
+    setTimeout(() => {
+      toast('已更新到 v' + VERSION + '，正在刷新…');
+      setTimeout(() => location.reload(true), 1200);
+    }, 700);
+  }
+  try { localStorage.setItem(k, VERSION); } catch (e) {}
+})();

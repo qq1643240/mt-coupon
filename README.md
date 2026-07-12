@@ -118,6 +118,27 @@ wrangler deploy
 
 > 本项目仅用于个人收藏与快速访问领取链接，请遵守相关平台规则。
 
+## 跨设备同步（需宝塔版 /sync）
+
+数据默认存浏览器 `localStorage`（单设备）。如需手机/电脑/平板共享收藏，用**同步码**即可：
+1. 命令面板（`Ctrl/⌘+K` 或右上角 ⋯）→「设置同步码」：填一个只有你自己知道的字符串（如 `my-code-2026`），**所有设备填同一个**。
+2. 在设备 A →「上传同步（本机→云端）」：把本机收藏推到服务器文件 `sync/<同步码>.json`。
+3. 在设备 B →「下载同步（云端→本机）」：拉取该同步码的收藏覆盖本机。
+
+- 同步码即隔离密钥，不同码互不干扰；服务端只存 `sync/<清洗后的码>.json`，已做路径穿越过滤。
+- 上传=覆盖云端，下载=覆盖本机，建议**先上传再下载**或按需选择，避免互盖。
+- 云端 workers.dev（Cloudflare Worker）目前**未实现 /sync**，同步请走宝塔版（`http://IP:端口` 或反代后的 HTTPS 域名）。
+
+## 自动化测试（CI）
+
+仓库含两套测试，GitHub Actions 在每次 `push`/`PR` 自动运行（`node test_clipboard.mjs` + `node test_server.mjs`）：
+- `test_clipboard.mjs`：用 jsdom 真实加载页面，验证「读剪贴板领券 → 自动保存卡片」在 HTTPS 与 HTTP 两种上下文均生效。
+- `test_server.mjs`：拉起 `server.js`，断言动态接口返回 `Cache-Control: no-store`（防 `?jk` 缓存错位）与 `/sync` 同步往返一致。
+
+本地复跑：`npm i jsdom && node test_clipboard.mjs && node test_server.mjs`。
+
+> 前端静态资源带版本指纹（`index.html` 中 `app.js?v=1.xx`），配合 `app.js` 内的版本变更自动刷新，避免「部署了但用户看到旧版」。
+
 ## 宝塔自托管 + 自动部署（GitHub Webhook）
 
 `server.js` 是宝塔/自托管的 Node 版（与 `worker.js` 功能对齐：含 `?jk=` 深链与 `/api/deeplink` 中转页）。部署与自动同步：

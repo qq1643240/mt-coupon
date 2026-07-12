@@ -1,0 +1,15 @@
+name: Test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: 前端逻辑测试（jsdom）
+        run: node test_clipboard.mjs
+      - name: 服务端测试（no-store + /sync）
+        run: node test_server.mjs

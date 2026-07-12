@@ -4,6 +4,10 @@ _out.txt
 # 依赖
 node_modules/
 
+# 同步数据（运行时生成，含用户收藏，勿提交）
+sync/
+
+
 # 系统文件
 .DS_Store
 Thumbs.db

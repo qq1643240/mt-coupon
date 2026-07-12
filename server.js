@@ -5,7 +5,7 @@ const http = require('http'), https = require('https');
 const fs = require('fs'), path = require('path');
 const { URL } = require('url');
 const root = __dirname;
-const port = 8123;
+const port = process.env.PORT || 8123;
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 
 /* 服务端跟随重定向，取出最终 URL（Node 无跨域限制，可解析任意短链） */
@@ -262,6 +262,7 @@ http.createServer((req, res) => {
 
   /* 所有动态接口/深链响应禁止缓存：避免 Cloudflare/CDN 缓存导致「?jk 返回上一个商家」的错位 bug */
   const _dyn = u.pathname.startsWith('/api') || u.pathname === '/resolve'
+    || u.pathname === '/' || u.pathname === '/index.html'
     || u.searchParams.has('jk') || u.searchParams.has('jkclip');
   if (_dyn) {
     res.setHeader('Cache-Control', 'no-store, private, must-revalidate');
@@ -423,6 +424,38 @@ http.createServer((req, res) => {
       if (format === 'page') { return appJumpPage(res, app, h5); }
       res.writeHead(200, { 'Content-Type': types['.json'] });
       res.end(JSON.stringify({ ok: true, poi, ver, app, h5, _debug: { rawInput: target.substring(0, 200), extractedLink: link, finalUrl: finalUrl || null } }));
+    });
+    return;
+  }
+
+  /* ---- 跨设备同步：以 sync code 为 key 存储/读取收藏（个人自用，明文文件）---- */
+  const syncDir = path.join(root, 'sync');
+  try { fs.mkdirSync(syncDir, { recursive: true }); } catch (e) {}
+  function safeSyncKey(k) { return String(k || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64); }
+
+  if (u.pathname === '/sync' && (req.method === 'GET' || req.method === 'POST')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store, private, must-revalidate');
+    const key = safeSyncKey(u.searchParams.get('key'));
+    if (!key) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'missing key' })); return; }
+    const fp = path.join(syncDir, key + '.json');
+    if (req.method === 'GET') {
+      if (fs.existsSync(fp)) {
+        try { const arr = JSON.parse(fs.readFileSync(fp, 'utf8')); res.end(JSON.stringify({ ok: true, data: arr })); }
+        catch (e) { res.end(JSON.stringify({ ok: true, data: null })); }
+      } else {
+        res.end(JSON.stringify({ ok: true, data: null }));
+      }
+      return;
+    }
+    // POST：上传覆盖
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 5 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => {
+      let arr; try { arr = JSON.parse(body); } catch (e) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'invalid json' })); return; }
+      if (!Array.isArray(arr)) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'data must be array' })); return; }
+      try { fs.writeFileSync(fp, JSON.stringify(arr)); } catch (e) { res.writeHead(500, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'write failed' })); return; }
+      res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, count: arr.length }));
     });
     return;
   }

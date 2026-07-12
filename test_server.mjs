@@ -1,0 +1,67 @@
+// 服务端测试：验证动态接口 no-store 与 /sync 跨设备同步往返
+// 启动 node server.js（PORT=8124），用 http 直接打接口断言。
+import { spawn } from 'child_process';
+import http from 'http';
+
+const PORT = 8124;
+const srv = spawn('node', ['server.js'], { env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
+
+function req(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const data = body ? Buffer.from(body) : null;
+    const r = http.request(
+      { host: '127.0.0.1', port: PORT, path, method, headers: { 'Content-Type': 'application/json' } },
+      res => {
+        let buf = '';
+        res.on('data', c => (buf += c));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: buf }));
+      }
+    );
+    r.on('error', reject);
+    if (data) r.write(data);
+    r.end();
+  });
+}
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+(async () => {
+  await wait(900); // 等 server 起来
+  let fail = 0;
+
+  // 1) /resolve 必须 no-store（防 ?jk 缓存错位）
+  const r1 = await req('GET', '/resolve?url=https://example.com/x');
+  const cc = (r1.headers['cache-control'] || '').toLowerCase();
+  if (!cc.includes('no-store')) { console.log('[FAIL] /resolve 缺少 no-store:', cc); fail++; }
+  else console.log('[PASS] /resolve 返回 Cache-Control: no-store');
+
+  // 2) / 入口页也应 no-store
+  const r0 = await req('GET', '/');
+  const cc0 = (r0.headers['cache-control'] || '').toLowerCase();
+  if (!cc0.includes('no-store')) { console.log('[FAIL] / 入口页缺少 no-store:', cc0); fail++; }
+  else console.log('[PASS] / 入口页返回 no-store');
+
+  // 3) /sync 往返一致
+  const sample = JSON.stringify([{ id: '1', name: '店A', poi: 'P1', claimed: true }]);
+  const up = await req('POST', '/sync?key=testkey123', sample);
+  const upj = JSON.parse(up.body);
+  if (!upj.ok) { console.log('[FAIL] /sync POST:', up.body); fail++; }
+  else console.log('[PASS] /sync POST 上传成功');
+
+  const down = await req('GET', '/sync?key=testkey123');
+  const downj = JSON.parse(down.body);
+  if (!(downj.ok && Array.isArray(downj.data) && downj.data.length === 1 && downj.data[0].poi === 'P1')) {
+    console.log('[FAIL] /sync GET 往返不一致:', down.body); fail++;
+  } else console.log('[PASS] /sync GET 往返一致（' + downj.data.length + ' 条）');
+
+  // 4) 含 ../ 的 key 必须被安全清洗（防路径穿越，不能读到 /etc/passwd）
+  const bad = await req('GET', '/sync?key=../../etc/passwd');
+  if (bad.status === 500 || /root:/.test(bad.body)) {
+    console.log('[FAIL] 路径穿越未防护，status=', bad.status, bad.body); fail++;
+  } else {
+    console.log('[PASS] 非法 key 被安全清洗（无穿越，status=' + bad.status + '）');
+  }
+
+  srv.kill();
+  console.log(fail ? '\n=== 服务端测试有失败 ===' : '\n=== 服务端测试全部通过 ===');
+  process.exit(fail ? 1 : 0);
+})();
