@@ -516,6 +516,7 @@ body {
 .palette-list li { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 12px; cursor: pointer; font-size: 14px; }
 .palette-list li .pi { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--text); }
 .palette-list li .pi .ic { width: 19px; height: 19px; }
+.palette-list li .lbl { min-width: 60px; font-weight: 600; }
 .palette-list li .pk { margin-left: auto; }
 .palette-list li.active, .palette-list li:hover { background: var(--glass); }
 .palette-list li .desc { font-size: 12px; color: var(--muted); margin-left: 8px; }

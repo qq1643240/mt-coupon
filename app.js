@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.40'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.41'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -702,14 +702,14 @@ let paletteItems = [], paletteActive = 0;
 const COMMANDS = [
   { icon: ICON.search, label: '搜索商家', desc: '聚焦搜索框', keys: '/', run: () => $('#search').focus() },
   { icon: ICON.plus, label: '新增收藏', desc: '添加新商家券', keys: 'N', run: () => openEditor(null) },
-  { icon: ICON.bolt, label: '批量领取全部券', desc: '打开全部收藏 v8+v6', keys: 'B', run: batchClaimAll },
-  { icon: ICON.moon, label: '切换深色模式', desc: '浅色/深色', keys: 'T', run: toggleTheme },
-  { icon: ICON.open, label: 'API 调用说明', desc: '接口地址与用途', run: showApiDocs },
+  { icon: ICON.bolt, label: '批量领取', desc: '打开全部 v8+v6', keys: 'B', run: batchClaimAll },
+  { icon: ICON.moon, label: '切换深色', desc: '浅色/深色切换', keys: 'T', run: toggleTheme },
+  { icon: ICON.open, label: '接口说明', desc: '查看接口与用法', run: showApiDocs },
   { icon: ICON.save, label: '导出数据', desc: '下载 JSON 备份', run: exportData },
   { icon: ICON.import, label: '导入数据', desc: '从 JSON 恢复', run: importData },
-  { icon: ICON.bolt, label: '上传同步（本机→云端）', desc: '推送到同步服务器', run: syncUpload },
-  { icon: ICON.open, label: '下载同步（云端→本机）', desc: '从同步服务器拉取', run: syncDownload },
-  { icon: ICON.edit, label: '设置同步码', desc: '跨设备共用标识', run: setSyncKey },
+  { icon: ICON.bolt, label: '上传同步', desc: '本机推送到云端', run: syncUpload },
+  { icon: ICON.open, label: '下载同步', desc: '云端拉取到本机', run: syncDownload },
+  { icon: ICON.edit, label: '设置同步', desc: '跨设备共用标识', run: setSyncKey },
   { icon: ICON.trashAll, label: '清空全部', desc: '删除所有收藏', run: clearAll }
 ];
 
@@ -726,7 +726,7 @@ function renderPalette(q) {
   list.forEach((it, idx) => {
     const li = document.createElement('li');
     if (idx === paletteActive) li.className = 'active';
-    li.innerHTML = `<span class="pi">${it.icon || '•'}</span><span>${esc(it.label)}</span>${it.desc ? `<span class="desc">${esc(it.desc)}</span>` : ''}${it.keys ? `<kbd class="pk">${it.keys}</kbd>` : ''}`;
+    li.innerHTML = `<span class="pi">${it.icon || '•'}</span><span class="lbl">${esc(it.label)}</span>${it.desc ? `<span class="desc">${esc(it.desc)}</span>` : ''}${it.keys ? `<kbd class="pk">${it.keys}</kbd>` : ''}`;
     li.addEventListener('click', () => runPalette(it));
     li.addEventListener('mousemove', () => { paletteActive = idx; markActive(); });
     paletteList.appendChild(li);
