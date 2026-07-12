@@ -120,7 +120,7 @@ wrangler deploy
 
 `server.js` 是宝塔/自托管的 Node 版（与 `worker.js` 功能对齐：含 `?jk=` 深链与 `/api/deeplink` 中转页）。部署与自动同步：
 
-1. **宝塔装 Git**，终端执行 `git clone https://github.com/qq1643240/mt-coupon.git /www/wwwroot/mt`。
+1. **宝塔装 Git**，终端执行 `git clone git@github.com:qq1643240/mt-coupon.git /www/wwwroot/mt`（已配置 SSH key，免密）。
 2. 宝塔 → **Node 项目 → 添加项目**：目录 `/www/wwwroot/mt`、启动命令 `node server.js`、端口 `8123`、开机启动。
 3. **自动部署**：把 `webhook.js` 用 pm2 常驻（`pm2 start webhook.js --name deploy-hook`），它监听 `:9000`，收到 GitHub push 后自动 `git pull` + 重启项目。
    - GitHub 仓库 **Settings → Webhooks → Add webhook**：Payload URL 填 `http://<服务器公网IP>:9000/webhook`（或反代后的 https 地址）、Content type 选 `application/json`、`Secret` 填随机串、Events 选 **Just the push event**。
