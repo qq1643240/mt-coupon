@@ -844,13 +844,39 @@ function imeituanDeepLink(poi, ver) {
   return 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
 }
 /* 读取剪贴板文本：安全上下文（HTTPS/localhost）优先用 Clipboard API；
-   非安全上下文（如 http://IP:端口 的宝塔部署）Clipboard API 不可用，降级为手动粘贴 */
+   非安全上下文（如 http://IP:端口 的宝塔部署）Clipboard API 不可用，降级为站内粘贴弹窗 */
+function manualPasteClipboard() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('clipModal');
+    const ta = document.getElementById('clipInput');
+    const okBtn = document.getElementById('clipOk');
+    const cancelBtn = document.getElementById('clipCancel');
+    if (!modal || !ta || !okBtn) { resolve(''); return; } // 兜底：无弹窗元素则不阻塞
+    ta.value = '';
+    modal.classList.remove('hidden');
+    ta.focus();
+    const finish = val => {
+      modal.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      ta.onkeydown = null;
+      resolve((val || '').trim());
+    };
+    const onOk = () => finish(ta.value);
+    const onCancel = () => finish('');
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    ta.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) finish(ta.value); };
+  });
+}
+
 async function getClipboardText() {
   if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
     try { const t = await navigator.clipboard.readText(); if (t && t.trim()) return t; } catch (e) {}
   }
-  // 宝塔 HTTP 等不安全环境：弹窗让用户粘贴（Ctrl+V 即可），功能等效
-  return window.prompt('当前站点无法自动读取剪贴板（需 HTTPS 或 localhost）。\n请粘贴美团分享链接后点「确定」：') || '';
+  // 宝塔 HTTP 等不安全环境：Clipboard API 不可用 → 站内粘贴弹窗（Ctrl+V 即可），功能等效
+  toast('当前为 http 站点，浏览器禁止自动读剪贴板，请手动粘贴');
+  return await manualPasteClipboard();
 }
 
 async function quickJumpFromClipboard() {

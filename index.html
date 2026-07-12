@@ -119,6 +119,20 @@
     </div>
 
     <div id="toast" class="toast hidden"></div>
+
+    <!-- 非安全上下文（http 站点）读剪贴板降级：站内粘贴弹窗 -->
+    <div id="clipModal" class="clip-modal hidden">
+      <div class="modal-backdrop" id="clipBackdrop"></div>
+      <div class="clip-card">
+        <h3>粘贴美团分享链接</h3>
+        <p>当前为 http 站点，浏览器禁止自动读剪贴板。请 <b>Ctrl+V</b> 粘贴分享链接 / 整段话术后点「确定」。要走自动读取，请把站点部署到 HTTPS 域名（如宝塔反代 + SSL）。</p>
+        <textarea id="clipInput" placeholder="粘贴美团店铺分享链接或整段话术…"></textarea>
+        <div class="clip-actions">
+          <button class="btn" id="clipCancel" type="button">取消</button>
+          <button class="btn btn-primary" id="clipOk" type="button">确定</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

@@ -531,6 +531,33 @@ body {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* 非安全上下文读剪贴板降级：站内粘贴弹窗 */
+.clip-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 520px) { .clip-modal { align-items: center; } }
+.clip-modal .modal-backdrop { position: absolute; inset: 0; background: rgba(20,20,24,.3); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); animation: fade .2s; }
+.clip-card {
+  position: relative; background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%);
+  width: 100%; max-width: 480px; border-radius: 22px 22px 0 0;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 20px 60px rgba(0,0,0,.28), inset 0 1px 0 var(--glass-hi);
+  padding: 18px; display: flex; flex-direction: column; gap: 12px;
+  animation: sheetUp .32s cubic-bezier(.2,.9,.3,1);
+}
+@media (min-width: 521px) { .clip-card { border-radius: 20px; animation: pop .22s ease; } }
+.clip-card h3 { font-size: 15px; margin: 0; }
+.clip-card p { font-size: 12.5px; color: var(--muted); margin: 0; line-height: 1.6; }
+.clip-card p b { color: var(--text); }
+.clip-card textarea {
+  width: 100%; min-height: 92px; resize: vertical;
+  background: var(--glass); border: 1px solid var(--glass-border); border-radius: 13px;
+  padding: 11px 12px; color: var(--text); font-size: 15px; outline: none; font-family: inherit;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.clip-card textarea:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(28,28,30,.1); }
+.clip-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.clip-actions .btn { padding: 10px 16px; }
+
 .kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
   background: var(--glass); border: 1px solid var(--glass-border); border-radius: 6px; padding: 1px 6px; color: var(--muted);
