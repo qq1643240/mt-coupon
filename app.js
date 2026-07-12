@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.44'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.45'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -308,6 +308,23 @@ let actsData = null, locsData = null;
 async function loadActs() { try { const r = await fetch('/api/acts', { cache: 'no-store' }); const j = await r.json(); actsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { actsData = []; } }
 async function loadLocs() { try { const r = await fetch('/api/locs', { cache: 'no-store' }); const j = await r.json(); locsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { locsData = []; } }
 
+/* 领取链接智能打开：微信小程序链接 → 微信打开；其余（美团 App / 普通链接）→ 浏览器打开 */
+function isWeixin() { return /micromessenger/i.test(navigator.userAgent); }
+function isMiniProgramLink(u) { return /^#小程序:\/\//i.test(u || '') || /^weixin:\/\//i.test(u || '') || /小程序/.test(u || ''); }
+function smartOpen(u) {
+  if (!u) return;
+  if (isMiniProgramLink(u)) {
+    // 微信小程序链接：微信内直接唤起；外部则复制并提示去微信打开
+    if (isWeixin()) { location.href = u; }
+    else if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(u).then(() => toast('已复制微信小程序链接，请在微信中打开'), () => toast('请在微信中打开：' + u));
+    } else toast('请在微信中打开：' + u);
+    return;
+  }
+  // 普通链接：跳转美团 App / 浏览器
+  window.open(u, '_blank');
+}
+
 /* 领券页：活动链接卡片，点击直接跳转领取 */
 function drawClaim() {
   $('#tagBar').classList.add('hidden');
@@ -319,8 +336,9 @@ function drawClaim() {
     : '<div class="empty-emoji" id="emptyIco"></div><p>还没有活动链接，命令面板 Ctrl+K → 后台管理 添加</p>');
   $('#empty').classList.toggle('hidden', arr.length > 0);
   arr.forEach(it => {
+    const isMini = isMiniProgramLink(it.url);
     const card = document.createElement('div');
-    card.className = 'card act-card';
+    card.className = 'card act-card' + (isMini ? ' act-mini' : '');
     card.innerHTML = `
       <div class="card-top">
         <div class="shop-meta">
@@ -329,8 +347,8 @@ function drawClaim() {
         </div>
         <div class="card-pin">${ICON.open}</div>
       </div>
-      <div class="card-addr" data-act="open"><span class="ca-label">${esc(it.url || '')}</span><span class="copy">${ICON.open}</span></div>`;
-    card.addEventListener('click', () => { if (it.url) window.open(it.url, '_blank'); });
+      <div class="card-addr" data-act="open"><span class="ca-label">${isMini ? '<b style="color:#07c160">微信</b> · ' : ''}${esc(it.url || '')}</span><span class="copy">${ICON.open}</span></div>`;
+    card.addEventListener('click', () => { if (it.url) smartOpen(it.url); });
     LIST.appendChild(card);
   });
 }
@@ -635,7 +653,13 @@ function setSyncKey() {
 }
 
 /* ---------- 深色模式 ---------- */
-function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); localStorage.setItem(THEME_KEY, t); }
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem(THEME_KEY, t);
+  // 同步浏览器地址栏/状态栏颜色，避免切换主题后顶部仍显示旧色（移动端“颜色卡住”现象）
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute('content', t === 'dark' ? '#171719' : '#e9ebef');
+}
 function toggleTheme() { const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; applyTheme(cur); toast(cur === 'dark' ? '已切换深色' : '已切换浅色'); }
 applyTheme(localStorage.getItem(THEME_KEY) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 

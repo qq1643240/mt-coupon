@@ -188,29 +188,52 @@ function extractMeta(s, prop) {
 function analyzeText(text) {
   const s = String(text || '');
   const out = { title: null, note: null, place: null, lat: null, lng: null, poi: null, urls: [] };
-  const urlRe = /https?:\/\/[^\s"'<>）)\]]+/gi;
+  // 支持 http(s) / 微信小程序(#小程序://) / weixin / 美团 scheme
+  const urlRe = /(?:https?:\/\/|#小程序:\/\/|weixin:\/\/|imeituan:\/\/|meituanwaimai:\/\/)[^\s"'<>）)\]]+/gi;
   let m; const urls = [];
   while ((m = urlRe.exec(s))) urls.push(m[0]);
   out.urls = urls;
   const poiM = s.match(/poi_id_str=([^&\s"'<>\\]+)/);
   if (poiM) out.poi = decodeURIComponent(poiM[1]);
+  let lat = null, lng = null;
   const latM = s.match(/(?:纬度|latitude|lat)\s*[:：=]?\s*([-\d.]+)/i);
   const lngM = s.match(/(?:经度|longitude|lng)\s*[:：=]?\s*([-\d.]+)/i);
-  if (latM) out.lat = latM[1];
-  if (lngM) out.lng = lngM[1];
-  if (!out.lat && !out.lng) {
+  if (latM) lat = latM[1];
+  if (lngM) lng = lngM[1];
+  if (lat == null && lng == null) {
     const pair = s.match(/([\d.]{1,3}\.\d+)\s*[°,，]\s*([\d.]{1,3}\.\d+)/);
-    if (pair) { out.lat = pair[1]; out.lng = pair[2]; }
+    if (pair) { lat = pair[1]; lng = pair[2]; }
   }
-  const placeM = s.match(/([\u4e00-\u9fa5A-Za-z0-9（）()·\-—\s]{2,30}?(?:路|区|县|市|店|商场|广场|大厦|园区|镇|村|大道|街|中心|公寓|小区|馆|城|园|站|湾|港|苑|寓))/);
-  if (placeM) out.place = placeM[1].trim();
+  // 智能判别经纬度：纬度∈[-90,90]，经度∈[-180,180]；超出纬度范围者判为经度（自动纠正顺序/单位）
+  if (lat != null && lng != null) {
+    const la = parseFloat(lat), ln = parseFloat(lng);
+    if ((la > 90 || la < -90) && ln >= -90 && ln <= 90) { const t = lat; lat = lng; lng = t; }
+  } else if (lat != null) {
+    const la = parseFloat(lat);
+    if (la > 90 || la < -90) { lng = lat; lat = null; } // 单值且超出纬度范围 → 当作经度
+  }
+  out.lat = lat; out.lng = lng;
+  // 地名：贪婪匹配到最后一个行政区划后缀（覆盖「抚州市南城县」），并去掉「我在/在/于」等前缀
+  const placeM = s.match(/([\u4e00-\u9fa5A-Za-z0-9（）()·\-—]{2,30}(?:路|区|县|市|店|商场|广场|大厦|园区|镇|村|大道|街|中心|公寓|小区|馆|城|园|站|湾|港|苑|寓))/);
+  if (placeM) {
+    let p = placeM[1].trim().replace(/^(?:我在|在|于|到|从)\s*/, '');
+    out.place = p;
+  }
   const qM = s.match(/[「『"']([^」』"']{2,40})[」』"']/);
   if (qM) out.title = qM[1].trim();
   const mj = s.match(/满\s*(\d+)\s*减\s*(\d+)/);
   if (mj) out.note = (out.note ? out.note + ' ' : '') + ('满' + mj[1] + '减' + mj[2]);
   if (!out.title) {
     const lines = s.split(/[\n\r]+/).map(x => x.trim()).filter(Boolean);
-    if (lines[0]) out.title = lines[0].slice(0, 200);
+    if (lines[0]) {
+      // 首行兜底：去掉坐标 / 链接 / 满减等干扰，保留纯活动名
+      let t = lines[0]
+        .replace(/纬度\s*[:：=]?\s*[-\d.]+/gi, '')
+        .replace(/经度\s*[:：=]?\s*[-\d.]+/gi, '')
+        .replace(/https?:\/\/[^\s]+/gi, '').replace(/#小程序:\/\/[^\s]+/gi, '')
+        .replace(/\s{2,}/g, ' ').trim();
+      if (t) out.title = t.slice(0, 200);
+    }
   }
   return out;
 }

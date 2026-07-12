@@ -127,6 +127,20 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     console.log('[FAIL] /api/analyze 活动话术解析异常：', az2.body); fail++;
   } else console.log('[PASS] /api/analyze 识别出 标题/满减/链接（' + azj2.title + ' ' + azj2.note + '）');
 
+  // 9) 智能识别：地名完整 + 经纬度方向智能判别（用户反馈样例）
+  const az3 = await req('POST', '/api/analyze', JSON.stringify({ text: '抚州市南城县\n经度：116.636999纬度：27.569889' }));
+  const azj3 = JSON.parse(az3.body || '{}');
+  if (!(azj3.ok && azj3.place === '抚州市南城县' && azj3.lat === '27.569889' && azj3.lng === '116.636999')) {
+    console.log('[FAIL] /api/analyze 地名/经纬度异常：', az3.body); fail++;
+  } else console.log('[PASS] /api/analyze 完整识别 抚州市南城县 且经纬度方向正确（lat=' + azj3.lat + ' lng=' + azj3.lng + '）');
+
+  // 10) 智能识别：#小程序:// 微信链接应被捕获
+  const az4 = await req('POST', '/api/analyze', JSON.stringify({ text: '#小程序://美团外卖丨外卖美食奶茶咖啡水果/MzU21pJgFMSGJNw 领券' }));
+  const azj4 = JSON.parse(az4.body || '{}');
+  if (!(azj4.ok && Array.isArray(azj4.urls) && azj4.urls[0] && azj4.urls[0].indexOf('#小程序://') === 0)) {
+    console.log('[FAIL] /api/analyze 小程序链接未识别：', az4.body); fail++;
+  } else console.log('[PASS] /api/analyze 识别 #小程序:// 微信链接');
+
   srv.kill();
   console.log(fail ? '\n=== 服务端测试有失败 ===' : '\n=== 服务端测试全部通过 ===');
   process.exit(fail ? 1 : 0);

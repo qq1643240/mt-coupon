@@ -58,15 +58,13 @@
 
     <div class="card">
       <div class="sec-t">领券</div>
-      <label>智能识别（粘贴文字话术，或上传图片自动 OCR）</label>
-      <textarea id="actText" placeholder="粘贴整段分享话术，如：「肯德基宅急送」满30减12 https://..."></textarea>
+      <label>智能识别（粘贴文字 / 链接，或上传图片 OCR）</label>
+      <textarea id="actText" placeholder="粘贴整段话术或链接，如：「肯德基宅急送」满30减12 https://... 或 #小程序://..."></textarea>
       <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
         <input id="actImg" type="file" accept="image/*" style="flex:1;font-size:13px" />
         <button class="btn-ghost" id="actSmart" type="button">智能识别</button>
       </div>
-      <p class="hint">识别文字或图片中的标题 / 满减 / 链接，自动填入下方表单</p>
-      <label style="margin-top:10px">从链接导入（自动识别标题/描述，可选）</label>
-      <div class="row"><input id="actImport" placeholder="粘贴活动/商品链接" /><button class="btn-ghost" id="actParse" type="button">解析</button></div>
+      <p class="hint">文字 / 图片 / 链接 一键识别，自动填入下方表单（链接同时抓取网页标题与描述）</p>
       <label>标题</label>
       <input id="actTitle" placeholder="如：周三外卖节 满30减12" />
       <label>活动链接（点击即跳转领取）</label>
@@ -79,15 +77,13 @@
 
     <div class="card">
       <div class="sec-t">定位</div>
-      <label>智能识别（粘贴文字，或上传图片自动 OCR）</label>
-      <textarea id="locText" placeholder="粘贴含地名/经纬度的文字，如：深圳南山科技园 22.5312, 113.9456"></textarea>
+      <label>智能识别（粘贴文字 / 链接，或上传图片 OCR）</label>
+      <textarea id="locText" placeholder="粘贴含地名/经纬度的文字，如：抚州市南城县 经度：116.636999 纬度：27.569889"></textarea>
       <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
         <input id="locImg" type="file" accept="image/*" style="flex:1;font-size:13px" />
         <button class="btn-ghost" id="locSmart" type="button">智能识别</button>
       </div>
-      <p class="hint">识别文字或图片中的地名 / 纬度 / 经度，自动填入下方表单</p>
-      <label style="margin-top:10px">从链接导入（自动识别地名/经纬度，可选）</label>
-      <div class="row"><input id="locImport" placeholder="粘贴定位/地图分享链接" /><button class="btn-ghost" id="locParse" type="button">解析</button></div>
+      <p class="hint">文字 / 图片 / 链接 一键识别，自动填入下方表单（地名 / 纬度 / 经度 自动判别）</p>
       <div class="row">
         <div><label>地名</label><input id="locPlace" placeholder="如：深圳南山科技园" /></div>
         <div><label>纬度 lat</label><input id="locLat" placeholder="22.53" /></div>
@@ -167,29 +163,11 @@ document.getElementById('locAdd').onclick = function () {
   var p = window.__editLoc ? api('PUT', '/api/locs/' + window.__editLoc, body) : api('POST', '/api/locs', body);
   p.then(function () { window.__editLoc = null; document.getElementById('locPlace').value = ''; document.getElementById('locLat').value = ''; document.getElementById('locLng').value = ''; document.getElementById('locNote').value = ''; loadLocs(); });
 };
-document.getElementById('actParse').onclick = function () {
-  var url = document.getElementById('actImport').value.trim();
-  if (!url) { alert('请粘贴链接'); return; }
-  api('GET', '/api/import?url=' + encodeURIComponent(url)).then(function (j) {
-    if (j && j.ok) {
-      if (j.title) document.getElementById('actTitle').value = j.title;
-      if (j.note) document.getElementById('actNote').value = j.note;
-      if (!document.getElementById('actUrl').value) document.getElementById('actUrl').value = url;
-    } else alert('解析失败：' + ((j && j.error) || ''));
-  });
-};
-document.getElementById('locParse').onclick = function () {
-  var url = document.getElementById('locImport').value.trim();
-  if (!url) { alert('请粘贴链接'); return; }
-  api('GET', '/api/import?url=' + encodeURIComponent(url)).then(function (j) {
-    if (j && j.ok) {
-      if (j.place) document.getElementById('locPlace').value = j.place;
-      if (j.lat) document.getElementById('locLat').value = j.lat;
-      if (j.lng) document.getElementById('locLng').value = j.lng;
-      if (j.note) document.getElementById('locNote').value = j.note;
-    } else alert('解析失败：' + ((j && j.error) || ''));
-  });
-};
+/* 从文字中提取第一个链接（http(s) / #小程序 / weixin 等） */
+function firstUrl(text) {
+  var m = String(text || '').match(/(?:https?:\/\/|#小程序:\/\/|weixin:\/\/|imeituan:\/\/|meituanwaimai:\/\/)[^\s"'<>）)\]]+/i);
+  return m ? m[0] : null;
+}
 
 /* 浏览器端 OCR：把图片转成文字（Tesseract.js，中文+英文） */
 function ocrImage(file) {
@@ -201,51 +179,65 @@ function ocrImage(file) {
   });
 }
 
-/* 领券：智能识别（文字或图片OCR → 后端 /api/analyze → 回填表单） */
+/* 领券：智能识别（文字 / 图片OCR / 链接 合一 → 后端 /api/analyze + /api/import → 回填） */
 document.getElementById('actSmart').onclick = function () {
   var text = document.getElementById('actText').value.trim();
   var file = document.getElementById('actImg').files[0];
   var btn = this;
-  if (!text && !file) { alert('请粘贴文字或上传图片'); return; }
+  if (!text && !file) { alert('请粘贴文字 / 链接，或上传图片'); return; }
   btn.disabled = true; btn.textContent = '识别中…';
-  var fill = function (t) {
-    btn.disabled = false; btn.textContent = '智能识别';
-    if (!t) { alert('未识别到文字内容'); return; }
-    api('POST', '/api/analyze', { text: t }).then(function (j) {
+  var done = function (t) {
+    if (!t) { btn.disabled = false; btn.textContent = '智能识别'; alert('未识别到文字内容'); return; }
+    var link = firstUrl(t);
+    var imp = link ? api('GET', '/api/import?url=' + encodeURIComponent(link)) : Promise.resolve(null);
+    var anz = api('POST', '/api/analyze', { text: t });
+    Promise.all([imp, anz]).then(function (rs) {
+      btn.disabled = false; btn.textContent = '智能识别';
+      var im = rs[0], j = rs[1];
       if (!j || !j.ok) { alert('识别失败'); return; }
-      if (j.title) document.getElementById('actTitle').value = j.title;
-      if (j.note) {
+      var title = (im && im.ok && im.title) ? im.title : j.title;
+      var note = (im && im.ok && im.note) ? im.note : j.note;
+      var url = link || (j.urls && j.urls[0]) || (im && im.finalUrl) || (j.poi ? j.poi : '');
+      if (title) document.getElementById('actTitle').value = title;
+      if (note) {
         var n = document.getElementById('actNote').value;
-        document.getElementById('actNote').value = (n ? n + ' ' : '') + j.note;
+        document.getElementById('actNote').value = (n ? n + ' ' : '') + note;
       }
-      if (j.urls && j.urls[0]) document.getElementById('actUrl').value = j.urls[0];
-      if (j.poi && !document.getElementById('actUrl').value) document.getElementById('actUrl').value = j.poi;
-    });
+      if (url) document.getElementById('actUrl').value = url;
+    }).catch(function () { btn.disabled = false; btn.textContent = '智能识别'; alert('识别失败'); });
   };
-  if (text) { fill(text); }
-  else { ocrImage(file).then(fill).catch(function (e) { btn.disabled = false; btn.textContent = '智能识别'; alert('OCR 失败：' + e.message); }); }
+  if (text) { done(text); }
+  else { ocrImage(file).then(done).catch(function (e) { btn.disabled = false; btn.textContent = '智能识别'; alert('OCR 失败：' + e.message); }); }
 };
 
-/* 定位：智能识别（文字或图片OCR → 后端 /api/analyze → 回填表单） */
+/* 定位：智能识别（文字 / 图片OCR / 链接 合一 → 后端 /api/analyze + /api/import → 回填） */
 document.getElementById('locSmart').onclick = function () {
   var text = document.getElementById('locText').value.trim();
   var file = document.getElementById('locImg').files[0];
   var btn = this;
-  if (!text && !file) { alert('请粘贴文字或上传图片'); return; }
+  if (!text && !file) { alert('请粘贴文字 / 链接，或上传图片'); return; }
   btn.disabled = true; btn.textContent = '识别中…';
-  var fill = function (t) {
-    btn.disabled = false; btn.textContent = '智能识别';
-    if (!t) { alert('未识别到文字内容'); return; }
-    api('POST', '/api/analyze', { text: t }).then(function (j) {
+  var done = function (t) {
+    if (!t) { btn.disabled = false; btn.textContent = '智能识别'; alert('未识别到文字内容'); return; }
+    var link = firstUrl(t);
+    var imp = link ? api('GET', '/api/import?url=' + encodeURIComponent(link)) : Promise.resolve(null);
+    var anz = api('POST', '/api/analyze', { text: t });
+    Promise.all([imp, anz]).then(function (rs) {
+      btn.disabled = false; btn.textContent = '智能识别';
+      var im = rs[0], j = rs[1];
       if (!j || !j.ok) { alert('识别失败'); return; }
-      if (j.place) document.getElementById('locPlace').value = j.place;
-      if (j.lat) document.getElementById('locLat').value = j.lat;
-      if (j.lng) document.getElementById('locLng').value = j.lng;
-      if (j.note && !document.getElementById('locNote').value) document.getElementById('locNote').value = j.note;
-    });
+      var place = (im && im.ok && im.place) ? im.place : j.place;
+      var lat = (im && im.ok && im.lat) ? im.lat : j.lat;
+      var lng = (im && im.ok && im.lng) ? im.lng : j.lng;
+      if (place) document.getElementById('locPlace').value = place;
+      if (lat) document.getElementById('locLat').value = lat;
+      if (lng) document.getElementById('locLng').value = lng;
+      var n = (im && im.ok && im.note) ? im.note : (j.note || '');
+      if (n && !document.getElementById('locNote').value) document.getElementById('locNote').value = n;
+    }).catch(function () { btn.disabled = false; btn.textContent = '智能识别'; alert('识别失败'); });
   };
-  if (text) { fill(text); }
-  else { ocrImage(file).then(fill).catch(function (e) { btn.disabled = false; btn.textContent = '智能识别'; alert('OCR 失败：' + e.message); }); }
+  if (text) { done(text); }
+  else { ocrImage(file).then(done).catch(function (e) { btn.disabled = false; btn.textContent = '智能识别'; alert('OCR 失败：' + e.message); }); }
 };
 document.getElementById('chgPass').onclick = function () {
   var cur = document.getElementById('curPass').value, nw = document.getElementById('newPass').value;
