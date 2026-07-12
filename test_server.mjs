@@ -6,11 +6,13 @@ import http from 'http';
 const PORT = 8124;
 const srv = spawn('node', ['server.js'], { env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });
 
-function req(method, path, body) {
+function req(method, path, body, token) {
   return new Promise((resolve, reject) => {
     const data = body ? Buffer.from(body) : null;
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
     const r = http.request(
-      { host: '127.0.0.1', port: PORT, path, method, headers: { 'Content-Type': 'application/json' } },
+      { host: '127.0.0.1', port: PORT, path, method, headers },
       res => {
         let buf = '';
         res.on('data', c => (buf += c));
@@ -59,6 +61,36 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     console.log('[FAIL] 路径穿越未防护，status=', bad.status, bad.body); fail++;
   } else {
     console.log('[PASS] 非法 key 被安全清洗（无穿越，status=' + bad.status + '）');
+  }
+
+  // 5) 后台：未登录不能写，登录后可增删查
+  const noAuth = await req('POST', '/api/acts', JSON.stringify({ title: 't', url: 'https://x.com' }));
+  if (noAuth.status !== 401) { console.log('[FAIL] 未登录可写活动：', noAuth.status); fail++; }
+  else console.log('[PASS] 未登录写入被拒（401）');
+
+  const login = await req('POST', '/admin/login', JSON.stringify({ pass: 'mt6866admin' }));
+  const lj = JSON.parse(login.body);
+  if (!lj.ok || !lj.token) { console.log('[FAIL] 后台登录失败：', login.body); fail++; }
+  else {
+    const token = lj.token;
+    const add = await req('POST', '/api/acts', JSON.stringify({ title: '周三外卖节', url: 'https://activity.example.com/a', note: '满30减12' }), token);
+    const aj = JSON.parse(add.body);
+    if (!aj.ok || !aj.item || !aj.item.id) { console.log('[FAIL] 添加活动失败：', add.body); fail++; }
+    else {
+      console.log('[PASS] 登录后添加活动成功');
+      const get = await req('GET', '/api/acts');
+      const gj = JSON.parse(get.body);
+      if (!(gj.ok && Array.isArray(gj.data) && gj.data.length >= 1)) { console.log('[FAIL] 读取活动列表失败：', get.body); fail++; }
+      else console.log('[PASS] /api/acts 读取成功（' + gj.data.length + ' 条，公开可读）');
+      // no-store 校验
+      const ccA = (get.headers['cache-control'] || '').toLowerCase();
+      if (!ccA.includes('no-store')) { console.log('[FAIL] /api/acts 缺少 no-store'); fail++; }
+      else console.log('[PASS] /api/acts 返回 no-store');
+      const del = await req('DELETE', '/api/acts/' + aj.item.id, '', token);
+      const dj = JSON.parse(del.body);
+      if (!dj.ok) { console.log('[FAIL] 删除活动失败：', del.body); fail++; }
+      else console.log('[PASS] 删除活动成功');
+    }
   }
 
   srv.kill();

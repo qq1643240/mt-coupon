@@ -7,6 +7,71 @@ const { URL } = require('url');
 const root = __dirname;
 const port = process.env.PORT || 8123;
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
+const crypto = require('crypto');
+
+/* ---- 后台管理：活动链接 / 定位点（JSON 文件存储）---- */
+const dataDir = path.join(root, 'data');
+try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
+function loadJson(fp, def) { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (e) { return def; } }
+function saveJson(fp, v) { try { fs.writeFileSync(fp, JSON.stringify(v, null, 2)); } catch (e) {} }
+function str(v, n) { return String(v == null ? '' : v).slice(0, n); }
+
+/* ---- 后台登录令牌（内存，重启失效；个人自用足够）---- */
+const adminTokens = new Set();
+const ADMIN_PASS = process.env.ADMIN_PASS || 'mt6866admin';
+function genToken() { return crypto.randomBytes(24).toString('hex'); }
+function readBody(req) {
+  return new Promise(resolve => {
+    let b = ''; req.on('data', c => { b += c; if (b.length > 2 * 1024 * 1024) req.destroy(); });
+    req.on('end', () => resolve(b)); req.on('error', () => resolve(''));
+  });
+}
+function authOk(req) {
+  const h = req.headers['authorization'] || '';
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  if (m && adminTokens.has(m[1])) return true;
+  const ck = (req.headers['cookie'] || '').match(/admin_token=([^;]+)/);
+  if (ck && adminTokens.has(ck[1])) return true;
+  return false;
+}
+function handleCrud(req, res, u, name, file, build) {
+  const fp = path.join(dataDir, file);
+  const idm = u.pathname.match(new RegExp('/api/' + name + '/(.+)$'));
+  const id = idm ? decodeURIComponent(idm[1]) : null;
+  if (req.method === 'GET') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.writeHead(200, { 'Content-Type': types['.json'] });
+    res.end(JSON.stringify({ ok: true, data: loadJson(fp, []) }));
+    return;
+  }
+  if (!authOk(req)) {
+    res.writeHead(401, { 'Content-Type': types['.json'] });
+    res.end(JSON.stringify({ ok: false, error: '未授权：请先在后台登录' }));
+    return;
+  }
+  readBody(req).then(body => {
+    let obj; try { obj = JSON.parse(body || '{}'); } catch (e) {
+      res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'invalid json' })); return;
+    }
+    let arr = loadJson(fp, []);
+    if (req.method === 'POST') {
+      const item = build(obj); item.id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); item.updatedAt = Date.now();
+      arr.unshift(item); saveJson(fp, arr);
+      res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, item }));
+    } else if (req.method === 'PUT' && id) {
+      const i = arr.findIndex(x => x.id === id);
+      if (i < 0) { res.writeHead(404, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'not found' })); return; }
+      arr[i] = Object.assign({}, arr[i], build(obj), { id, updatedAt: Date.now() });
+      saveJson(fp, arr);
+      res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, item: arr[i] }));
+    } else if (req.method === 'DELETE' && id) {
+      arr = arr.filter(x => x.id !== id); saveJson(fp, arr);
+      res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, count: arr.length }));
+    } else {
+      res.writeHead(405, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'method not allowed' }));
+    }
+  });
+}
 
 /* 服务端跟随重定向，取出最终 URL（Node 无跨域限制，可解析任意短链） */
 function follow(u, depth, cb) {
@@ -263,10 +328,44 @@ http.createServer((req, res) => {
   /* 所有动态接口/深链响应禁止缓存：避免 Cloudflare/CDN 缓存导致「?jk 返回上一个商家」的错位 bug */
   const _dyn = u.pathname.startsWith('/api') || u.pathname === '/resolve'
     || u.pathname === '/' || u.pathname === '/index.html'
+    || u.pathname === '/admin' || u.pathname.startsWith('/admin/')
     || u.searchParams.has('jk') || u.searchParams.has('jkclip');
   if (_dyn) {
     res.setHeader('Cache-Control', 'no-store, private, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
+  }
+
+  /* ---- 后台登录 ---- */
+  if (u.pathname === '/admin/login' && req.method === 'POST') {
+    readBody(req).then(body => {
+      let obj; try { obj = JSON.parse(body || '{}'); } catch (e) { obj = {}; }
+      if (obj.pass === ADMIN_PASS) {
+        const tk = genToken(); adminTokens.add(tk);
+        res.setHeader('Set-Cookie', 'admin_token=' + tk + '; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax');
+        res.writeHead(200, { 'Content-Type': types['.json'] });
+        res.end(JSON.stringify({ ok: true, token: tk }));
+      } else {
+        res.writeHead(403, { 'Content-Type': types['.json'] });
+        res.end(JSON.stringify({ ok: false, error: '密码错误' }));
+      }
+    });
+    return;
+  }
+
+  /* ---- 活动链接 / 定位点 CRUD（GET 公开；POST/PUT/DELETE 需登录）---- */
+  if (u.pathname.startsWith('/api/acts')) {
+    return handleCrud(req, res, u, 'acts', 'acts.json', o => ({ title: str(o.title, 200), url: str(o.url, 2000), note: str(o.note, 500) }));
+  }
+  if (u.pathname.startsWith('/api/locs')) {
+    return handleCrud(req, res, u, 'locs', 'locs.json', o => ({ place: str(o.place, 200), lat: str(o.lat, 30), lng: str(o.lng, 30), note: str(o.note, 500) }));
+  }
+
+  /* ---- 后台管理页面 ---- */
+  if (u.pathname === '/admin') {
+    const af = path.join(root, 'admin.html');
+    if (fs.existsSync(af)) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(fs.readFileSync(af, 'utf8')); }
+    else { res.writeHead(404); res.end('admin.html missing'); }
+    return;
   }
 
   /* ---- ?jk=v8|v6=<美团分享链接/整段话术> → 解析短链 → 唤起美团 App（快捷指令用）---- */

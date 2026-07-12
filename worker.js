@@ -436,6 +436,62 @@ export default {
       }
     }
 
+    /* ===== 后台管理（需绑定 ADMIN_KV + 设置 ADMIN_PASS）===== */
+    const kv = env.ADMIN_KV;
+    const ADMIN_PASS_W = env.ADMIN_PASS || 'mt6866admin';
+    async function admAuth(request) {
+      const h = request.headers.get('authorization') || '';
+      const m = h.match(/^Bearer\s+(.+)$/i);
+      if (m && kv) { if (await kv.get('tok:' + m[1])) return true; }
+      const ck = (request.headers.get('cookie') || '').match(/admin_token=([^;]+)/);
+      if (ck && kv) { if (await kv.get('tok:' + ck[1])) return true; }
+      return false;
+    }
+    async function getAdminData(key) { if (!kv) return []; try { return JSON.parse(await kv.get(key) || '[]'); } catch { return []; } }
+    async function setAdminData(key, v) { if (!kv) return; await kv.put(key, JSON.stringify(v)); }
+
+    if (path === '/admin/login' && request.method === 'POST') {
+      let obj = {}; try { obj = await request.json(); } catch {}
+      if (obj.pass === ADMIN_PASS_W) {
+        if (!kv) return json({ ok: false, error: '云端未配置 ADMIN_KV，请使用宝塔版后台' }, 501);
+        const tk = crypto.randomUUID();
+        await kv.put('tok:' + tk, '1', { expirationTtl: 86400 });
+        return new Response(JSON.stringify({ ok: true, token: tk }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store',
+            'Set-Cookie': 'admin_token=' + tk + '; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax' }
+        });
+      }
+      return json({ ok: false, error: '密码错误' }, 403);
+    }
+
+    if (path.startsWith('/api/acts') || path.startsWith('/api/locs')) {
+      const name = path.startsWith('/api/acts') ? 'acts' : 'locs';
+      const idm = path.match(new RegExp('/api/' + name + '/(.+)$'));
+      const id = idm ? decodeURIComponent(idm[1]) : null;
+      if (request.method === 'GET') return json({ ok: true, data: await getAdminData(name) });
+      if (!await admAuth(request)) return json({ ok: false, error: '未授权：请先在后台登录' }, 401);
+      let obj = {}; try { obj = await request.json(); } catch {}
+      let arr = await getAdminData(name);
+      const field = name === 'acts'
+        ? o => ({ title: String(o.title || '').slice(0, 200), url: String(o.url || '').slice(0, 2000), note: String(o.note || '').slice(0, 500) })
+        : o => ({ place: String(o.place || '').slice(0, 200), lat: String(o.lat || '').slice(0, 30), lng: String(o.lng || '').slice(0, 30), note: String(o.note || '').slice(0, 500) });
+      if (request.method === 'POST') {
+        const item = field(obj); item.id = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); item.updatedAt = Date.now();
+        arr.unshift(item); await setAdminData(name, arr); return json({ ok: true, item });
+      } else if ((request.method === 'PUT' || request.method === 'DELETE') && id) {
+        if (request.method === 'DELETE') arr = arr.filter(x => x.id !== id);
+        else { const i = arr.findIndex(x => x.id === id); if (i < 0) return json({ ok: false, error: 'not found' }, 404); arr[i] = Object.assign({}, arr[i], field(obj), { id, updatedAt: Date.now() }); }
+        await setAdminData(name, arr);
+        return json({ ok: true, item: arr.find(x => x.id === id) || null });
+      }
+      return json({ ok: false, error: 'method not allowed' }, 405);
+    }
+
+    if (path === '/admin') {
+      return env.ASSETS.fetch(new Request(new URL('/admin.html', request.url).href, request));
+    }
+
     /* 其余请求交给静态资源（index.html / app.js / styles.css ...） */
     return env.ASSETS.fetch(request);
   }

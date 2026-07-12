@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>后台管理 · 美团津贴</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f3f4f7; color: #1c1c1e; padding: 18px; max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: #888; font-size: 12px; margin-bottom: 16px; }
+  .card { background: #fff; border: 1px solid #e6e6e6; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .sec-t { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+  label { display: block; font-size: 12px; color: #666; margin: 10px 0 4px; }
+  input { width: 100%; border: 1px solid #dcdcdc; border-radius: 10px; padding: 10px; font-size: 14px; font-family: inherit; }
+  .row { display: flex; gap: 10px; } .row > div { flex: 1; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 10px 14px; font-size: 13px; font-weight: 600; }
+  .btn-primary { background: #1c1c1e; color: #FFC93C; }
+  .btn-ghost { background: #eee; color: #333; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .item { border: 1px solid #eee; border-radius: 10px; padding: 10px; margin-top: 10px; display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .item .meta { flex: 1; min-width: 0; font-size: 13px; word-break: break-all; }
+  .item .meta b { font-size: 14px; }
+  .item a { color: #0066cc; font-size: 12px; word-break: break-all; }
+  .hidden { display: none; }
+  #loginBox { max-width: 300px; margin: 80px auto; background: #fff; border: 1px solid #e6e6e6; border-radius: 14px; padding: 22px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+  .tip { color: #c00; font-size: 12px; margin-top: 8px; min-height: 14px; }
+</style>
+</head>
+<body>
+  <div id="loginBox">
+    <h1>后台登录</h1>
+    <p class="sub">密码取环境变量 ADMIN_PASS（默认 mt6866admin）</p>
+    <label>密码</label>
+    <input id="pass" type="password" placeholder="请输入后台密码" />
+    <button class="btn-primary" id="loginBtn" style="margin-top:12px;width:100%">登录</button>
+    <p class="tip" id="loginTip"></p>
+  </div>
+
+  <div id="adminBox" class="hidden">
+    <h1>后台管理 · 美团津贴</h1>
+    <p class="sub">活动链接与定位点会展示在前端「领券」「分享膨胀定位」页面</p>
+
+    <div class="card">
+      <div class="sec-t">领券 · 活动链接</div>
+      <label>标题</label>
+      <input id="actTitle" placeholder="如：周三外卖节 满30减12" />
+      <label>活动链接（点击即跳转领取）</label>
+      <input id="actUrl" placeholder="https://..." />
+      <label>备注（选填）</label>
+      <input id="actNote" placeholder="选填" />
+      <button class="btn-primary" id="actAdd" style="margin-top:12px">添加活动链接</button>
+      <div id="actList"></div>
+    </div>
+
+    <div class="card">
+      <div class="sec-t">分享膨胀定位 · 定位点</div>
+      <div class="row">
+        <div><label>地名</label><input id="locPlace" placeholder="如：深圳南山科技园" /></div>
+        <div><label>纬度 lat</label><input id="locLat" placeholder="22.53" /></div>
+        <div><label>经度 lng</label><input id="locLng" placeholder="113.95" /></div>
+      </div>
+      <label>备注（选填）</label>
+      <input id="locNote" placeholder="选填" />
+      <button class="btn-primary" id="locAdd" style="margin-top:12px">添加定位点</button>
+      <div id="locList"></div>
+    </div>
+  </div>
+
+<script>
+var TOKEN = '';
+function api(method, path, body) {
+  var h = { 'Content-Type': 'application/json' };
+  if (TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
+  return fetch(path, { method: method, headers: h, body: body ? JSON.stringify(body) : undefined })
+    .then(function (r) { return r.json(); });
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+document.getElementById('loginBtn').onclick = function () {
+  var p = document.getElementById('pass').value;
+  fetch('/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass: p }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j.ok) {
+        TOKEN = j.token;
+        document.getElementById('loginBox').classList.add('hidden');
+        document.getElementById('adminBox').classList.remove('hidden');
+        loadAll();
+      } else {
+        document.getElementById('loginTip').textContent = j.error || '密码错误';
+      }
+    });
+};
+function renderActs(list) {
+  var box = document.getElementById('actList'); box.innerHTML = '';
+  (list || []).forEach(function (it) {
+    var d = document.createElement('div'); d.className = 'item';
+    d.innerHTML = '<div class="meta"><b>' + esc(it.title || '未命名') + '</b><br><a href="' + esc(it.url) + '" target="_blank">' + esc(it.url) + '</a>' + (it.note ? '<br>' + esc(it.note) : '') + '</div>';
+    var ed = document.createElement('button'); ed.className = 'btn-ghost'; ed.textContent = '编辑';
+    ed.onclick = function () { document.getElementById('actTitle').value = it.title || ''; document.getElementById('actUrl').value = it.url || ''; document.getElementById('actNote').value = it.note || ''; window.__editAct = it.id; };
+    var del = document.createElement('button'); del.className = 'btn-danger'; del.textContent = '删除';
+    del.onclick = function () { if (confirm('删除该活动链接？')) api('DELETE', '/api/acts/' + it.id).then(loadActs); };
+    d.appendChild(ed); d.appendChild(del); box.appendChild(d);
+  });
+}
+function renderLocs(list) {
+  var box = document.getElementById('locList'); box.innerHTML = '';
+  (list || []).forEach(function (it) {
+    var d = document.createElement('div'); d.className = 'item';
+    d.innerHTML = '<div class="meta"><b>' + esc(it.place || '未命名') + '</b><br>' + esc(it.lat) + ', ' + esc(it.lng) + (it.note ? '<br>' + esc(it.note) : '') + '</div>';
+    var ed = document.createElement('button'); ed.className = 'btn-ghost'; ed.textContent = '编辑';
+    ed.onclick = function () { document.getElementById('locPlace').value = it.place || ''; document.getElementById('locLat').value = it.lat || ''; document.getElementById('locLng').value = it.lng || ''; document.getElementById('locNote').value = it.note || ''; window.__editLoc = it.id; };
+    var del = document.createElement('button'); del.className = 'btn-danger'; del.textContent = '删除';
+    del.onclick = function () { if (confirm('删除该定位点？')) api('DELETE', '/api/locs/' + it.id).then(loadLocs); };
+    d.appendChild(ed); d.appendChild(del); box.appendChild(d);
+  });
+}
+function loadActs() { api('GET', '/api/acts').then(function (j) { renderActs(j.data); }); }
+function loadLocs() { api('GET', '/api/locs').then(function (j) { renderLocs(j.data); }); }
+function loadAll() { loadActs(); loadLocs(); }
+document.getElementById('actAdd').onclick = function () {
+  var body = { title: document.getElementById('actTitle').value, url: document.getElementById('actUrl').value, note: document.getElementById('actNote').value };
+  if (!body.url) { alert('请填写活动链接'); return; }
+  var p = window.__editAct ? api('PUT', '/api/acts/' + window.__editAct, body) : api('POST', '/api/acts', body);
+  p.then(function () { window.__editAct = null; document.getElementById('actTitle').value = ''; document.getElementById('actUrl').value = ''; document.getElementById('actNote').value = ''; loadActs(); });
+};
+document.getElementById('locAdd').onclick = function () {
+  var body = { place: document.getElementById('locPlace').value, lat: document.getElementById('locLat').value, lng: document.getElementById('locLng').value, note: document.getElementById('locNote').value };
+  if (!body.place) { alert('请填写地名'); return; }
+  var p = window.__editLoc ? api('PUT', '/api/locs/' + window.__editLoc, body) : api('POST', '/api/locs', body);
+  p.then(function () { window.__editLoc = null; document.getElementById('locPlace').value = ''; document.getElementById('locLat').value = ''; document.getElementById('locLng').value = ''; document.getElementById('locNote').value = ''; loadLocs(); });
+};
+</script>
+</body>
+</html>

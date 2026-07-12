@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.41'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.42'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -60,8 +60,9 @@ const seed = [
 ];
 
 let data = load();
-let curSeg = 'all';
+let curPage = 'shop'; // shop=商家津贴 / claim=领券 / loc=分享膨胀定位
 let curTag = null; // 当前选中标签，null = 显示全部
+const LIST = $('#list');
 function load() {
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
   return seed.slice();
@@ -234,12 +235,19 @@ function renderTagBar(allTags) {
 
 /* ---------- 渲染 ---------- */
 function render() {
+  if (curPage === 'claim') return drawClaim();
+  if (curPage === 'loc') return drawLoc();
+  return renderShop();
+}
+
+function setEmpty(html) { const e = $('#empty'); e.innerHTML = html; const ei = e.querySelector('#emptyIco'); if (ei) ei.innerHTML = ICON.ticket; }
+
+/* 商家津贴页：原有商家收藏卡片，去掉领取状态筛选，统一按更新时间排序 */
+function renderShop() {
   const q = ($('#search').value || '').trim().toLowerCase();
   let list_data = data.filter(it =>
     (!q || it.name.toLowerCase().includes(q) || (it.note || '').toLowerCase().includes(q))
   );
-  if (curSeg === 'todo') list_data = list_data.filter(i => !i.claimed);
-  else if (curSeg === 'done') list_data = list_data.filter(i => i.claimed);
   // 标签筛选
   if (curTag) list_data = list_data.filter(i => (i.tags || []).includes(curTag));
 
@@ -252,6 +260,7 @@ function render() {
   $('#statCount').textContent = `共 ${data.length} 个`;
   $('#statPinned').textContent = `置顶 ${data.filter(i => i.pinned).length}`;
   updateStatbar();
+  setEmpty('<div class="empty-emoji" id="emptyIco"></div><p>粘贴美团店铺链接即可自动识别并收藏</p>');
   $('#empty').classList.toggle('hidden', list_data.length > 0);
 
   // 渲染标签栏
@@ -294,8 +303,73 @@ function render() {
   });
 }
 
+/* ---------- 领券页 / 分享膨胀定位页：从后端读取并展示 ---------- */
+let actsData = null, locsData = null;
+async function loadActs() { try { const r = await fetch('/api/acts', { cache: 'no-store' }); const j = await r.json(); actsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { actsData = []; } }
+async function loadLocs() { try { const r = await fetch('/api/locs', { cache: 'no-store' }); const j = await r.json(); locsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { locsData = []; } }
+
+/* 领券页：活动链接卡片，点击直接跳转领取 */
+function drawClaim() {
+  $('#tagBar').classList.add('hidden');
+  const q = ($('#search').value || '').trim().toLowerCase();
+  const arr = (actsData || []).filter(it => !q || (it.title || '').toLowerCase().includes(q) || (it.url || '').toLowerCase().includes(q) || (it.note || '').toLowerCase().includes(q));
+  LIST.innerHTML = '';
+  setEmpty(actsData === null
+    ? '<div class="empty-emoji" id="emptyIco"></div><p>加载中…</p>'
+    : '<div class="empty-emoji" id="emptyIco"></div><p>还没有活动链接，命令面板 Ctrl+K → 后台管理 添加</p>');
+  $('#empty').classList.toggle('hidden', arr.length > 0);
+  arr.forEach(it => {
+    const card = document.createElement('div');
+    card.className = 'card act-card';
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="shop-meta">
+          <div class="card-name" title="${esc(it.title || '')}">${esc(it.title || '未命名活动')}</div>
+          ${it.note ? `<div class="card-sub"><span>${esc(it.note)}</span></div>` : ''}
+        </div>
+        <div class="card-pin">${ICON.open}</div>
+      </div>
+      <div class="card-addr" data-act="open"><span class="ca-label">${esc(it.url || '')}</span><span class="copy">${ICON.open}</span></div>`;
+    card.addEventListener('click', () => { if (it.url) window.open(it.url, '_blank'); });
+    LIST.appendChild(card);
+  });
+}
+
+/* 分享膨胀定位页：定位点卡片，点击复制「地名 纬度,经度」 */
+function drawLoc() {
+  $('#tagBar').classList.add('hidden');
+  const q = ($('#search').value || '').trim().toLowerCase();
+  const arr = (locsData || []).filter(it => !q || (it.place || '').toLowerCase().includes(q) || (it.lat || '').includes(q) || (it.lng || '').includes(q) || (it.note || '').toLowerCase().includes(q));
+  LIST.innerHTML = '';
+  setEmpty(locsData === null
+    ? '<div class="empty-emoji" id="emptyIco"></div><p>加载中…</p>'
+    : '<div class="empty-emoji" id="emptyIco"></div><p>还没有定位点，命令面板 Ctrl+K → 后台管理 添加</p>');
+  $('#empty').classList.toggle('hidden', arr.length > 0);
+  arr.forEach(it => {
+    const coord = (it.lat || '') + ', ' + (it.lng || '');
+    const card = document.createElement('div');
+    card.className = 'card loc-card';
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="shop-meta">
+          <div class="card-name" title="${esc(it.place || '')}">${esc(it.place || '未命名地点')}</div>
+          <div class="card-sub"><span>${esc(coord)}</span></div>
+          ${it.note ? `<div class="card-sub"><span>${esc(it.note)}</span></div>` : ''}
+        </div>
+      </div>
+      <div class="card-addr" data-act="copy"><span class="ca-label">点击复制：${esc(it.place || '')} ${esc(coord)}</span><span class="copy">${ICON.copy}</span></div>`;
+    card.addEventListener('click', () => {
+      const text = ((it.place || '') + ' ' + coord).trim();
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('已复制：' + text), () => toast(text));
+      else toast(text);
+    });
+    LIST.appendChild(card);
+  });
+}
+
 /* ---------- 列表事件 ---------- */
 $('#list').addEventListener('click', e => {
+  if (curPage !== 'shop') return; // 领券/定位页的卡片点击由各自渲染时绑定，不走商家逻辑
   const addrEl = e.target.closest('[data-addr]');
   if (addrEl) {
     const it = data.find(x => x.id === addrEl.dataset.addr);
@@ -493,9 +567,12 @@ function moveSegInd() {
   const i = segBtns.findIndex(b => b.classList.contains('active'));
   $('#segInd').style.transform = `translateX(${i * 100}%)`;
 }
-segBtns.forEach((b, i) => b.addEventListener('click', () => {
+segBtns.forEach((b, i) => b.addEventListener('click', async () => {
   segBtns.forEach(x => x.classList.remove('active'));
-  b.classList.add('active'); curSeg = b.dataset.seg; moveSegInd(); render();
+  b.classList.add('active'); curPage = b.dataset.page; moveSegInd();
+  if (curPage === 'claim') await loadActs();
+  else if (curPage === 'loc') await loadLocs();
+  render();
 }));
 moveSegInd();
 
@@ -679,6 +756,8 @@ $('#searchClear').addEventListener('click', () => {
 $('#search').addEventListener('input', e => {
   const v = e.target.value.trim();
   toggleSearchClear();
+  // 非商家页面：仅做客户端过滤（活动链接 / 定位点），不触发链接识别
+  if (curPage !== 'shop') { clearTimeout(searchTimer); searchTimer = setTimeout(render, 120); return; }
   if (extractUrl(v)) {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => handleLinkSearch(v), 500);
@@ -710,7 +789,8 @@ const COMMANDS = [
   { icon: ICON.bolt, label: '上传同步', desc: '本机推送到云端', run: syncUpload },
   { icon: ICON.open, label: '下载同步', desc: '云端拉取到本机', run: syncDownload },
   { icon: ICON.edit, label: '设置同步', desc: '跨设备共用标识', run: setSyncKey },
-  { icon: ICON.trashAll, label: '清空全部', desc: '删除所有收藏', run: clearAll }
+  { icon: ICON.trashAll, label: '清空全部', desc: '删除所有收藏', run: clearAll },
+  { icon: ICON.open, label: '后台管理', desc: '添加活动/定位', run: () => window.open('/admin', '_blank') }
 ];
 
 function paletteOpen(items, placeholder) {

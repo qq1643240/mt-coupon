@@ -10,6 +10,24 @@
 - 📌 置顶、🗑️ 删除、➕ 新增/编辑（填 `poi_id_str` 即可生成领取链接）
 - 🌗 深色模式、💾 导入/导出 JSON、🗑️ 清空
 - 🔗 **深度链接 / JSON API**（配合 iOS 快捷指令一键领取，见下）
+- 🗂️ **三个页面**（顶部切换，替代原「全部/待领取/已领取」状态筛选，统一按时间排序）：
+  - **商家津贴**：原有商家收藏卡片（搜索 / 标签 / 置顶 / 领取）
+  - **领券**：服务端「活动链接」卡片列表，点击直接跳转领取（后台维护）
+  - **分享膨胀定位**：服务端「地名 + 经纬度」定位点列表，点击复制（后台维护）
+
+## 后台管理（活动链接 / 定位点）
+
+领券页与分享膨胀定位页的内容由**服务端后台**统一管理（前端只展示 + 点击）：
+
+- 打开 `/admin` → 输入密码登录（密码取环境变量 **`ADMIN_PASS`**，默认 `mt6866admin`）。
+- 在后台添加 / 编辑 / 删除「活动链接」与「定位点」，保存即生效，前端页面自动读取。
+- 数据存于服务端 `data/acts.json`、`data/locs.json`（已加入 `.gitignore`，勿提交）。
+- 接口（GET 公开可读；POST/PUT/DELETE 需登录令牌）：
+  - `GET /api/acts`、`POST /api/acts`、`PUT /api/acts/:id`、`DELETE /api/acts/:id`
+  - `GET /api/locs`、`POST /api/locs`、`PUT /api/locs/:id`、`DELETE /api/locs/:id`
+  - `POST /admin/login` `{pass}` → `{ok, token}`
+- **宝塔版（server.js）**：开箱即用，文件存储。
+- **云端（worker.js）**：需绑定 Cloudflare **KV 命名空间** `ADMIN_KV` 并设置变量 `ADMIN_PASS`；未配置时写入会返回 501（提示改用宝塔版）。
 
 ## 深度链接（iOS 快捷指令一键领券）
 
