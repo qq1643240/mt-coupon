@@ -116,3 +116,17 @@ wrangler deploy
 
 > 本项目仅用于个人收藏与快速访问领取链接，请遵守相关平台规则。
 
+## 宝塔自托管 + 自动部署（GitHub Webhook）
+
+`server.js` 是宝塔/自托管的 Node 版（与 `worker.js` 功能对齐：含 `?jk=` 深链与 `/api/deeplink` 中转页）。部署与自动同步：
+
+1. **宝塔装 Git**，终端执行 `git clone https://github.com/qq1643240/mt-coupon.git /www/wwwroot/mt`。
+2. 宝塔 → **Node 项目 → 添加项目**：目录 `/www/wwwroot/mt`、启动命令 `node server.js`、端口 `8123`、开机启动。
+3. **自动部署**：把 `webhook.js` 用 pm2 常驻（`pm2 start webhook.js --name deploy-hook`），它监听 `:9000`，收到 GitHub push 后自动 `git pull` + 重启项目。
+   - GitHub 仓库 **Settings → Webhooks → Add webhook**：Payload URL 填 `http://<服务器公网IP>:9000/webhook`（或反代后的 https 地址）、Content type 选 `application/json`、`Secret` 填随机串、Events 选 **Just the push event**。
+   - 强烈建议用环境变量传参：`DEPLOY_SECRET=xxx DEPLOY_REPO=/www/wwwroot/mt DEPLOY_RESTART='pm2 restart mt-coupon' pm2 start webhook.js --name deploy-hook`（`pm2 restart` 的进程名以宝塔 Node 项目页 / `pm2 list` 实际为准）。
+   - 推荐用域名反代走 HTTPS：宝塔建 `hook.your.com` 网站 → 反向代理到 `127.0.0.1:9000`，Webhook URL 填 `https://hook.your.com/webhook`，无需放行额外端口。
+4. **前置条件**：服务器需能访问 GitHub（国内服务器可能需代理，与本地连 GitHub 同理）；否则 `git pull` 会失败，此时改完代码后只能手动覆盖文件。
+
+> 注：`webhook.js` 会随仓库 clone 下来；它只做部署触发，不参与主站点服务（主站点由 `server.js` 在端口 8123 提供）。
+
