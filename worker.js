@@ -297,7 +297,7 @@ export default {
 
       // ③ 有 H5 店铺页 URL 但没拿到 poi → 302 到 H5 页面本身（iOS 上该域名可能有 Universal Link）
       if (h5ShopUrl) {
-        return Response.redirect(h5ShopUrl, 302);
+        return new Response(null, { status: 302, headers: { 'Location': h5ShopUrl, 'Cache-Control': 'no-store, private' } });
       }
 
       // ④ 彻底失败

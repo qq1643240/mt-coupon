@@ -260,6 +260,14 @@ function extractMeta(s, prop) {
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost:' + port);
 
+  /* 所有动态接口/深链响应禁止缓存：避免 Cloudflare/CDN 缓存导致「?jk 返回上一个商家」的错位 bug */
+  const _dyn = u.pathname.startsWith('/api') || u.pathname === '/resolve'
+    || u.searchParams.has('jk') || u.searchParams.has('jkclip');
+  if (_dyn) {
+    res.setHeader('Cache-Control', 'no-store, private, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+  }
+
   /* ---- ?jk=v8|v6=<美团分享链接/整段话术> → 解析短链 → 唤起美团 App（快捷指令用）---- */
   if (u.searchParams.has('jk')) {
     const raw = decodeURIComponent(u.searchParams.get('jk') || '');

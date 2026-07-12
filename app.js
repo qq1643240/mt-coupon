@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.38'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.39'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -425,7 +425,7 @@ function openDetail(it) {
   openModal();
   // ====== 商家券实时更新：每次打开详情都查询后端最新数据 ======
   if (it.poi) {
-    fetch('/api/shop?poi=' + encodeURIComponent(it.poi))
+    fetch('/api/shop?poi=' + encodeURIComponent(it.poi), { cache: 'no-store' })
       .then(r => r.json().catch(() => ({})))
       .then(j => {
         if (!(j && j.ok)) return;
@@ -795,7 +795,7 @@ function handleDeepLink() {
     const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
     if (um) {
       toast('正在解析店铺…');
-      fetch('/resolve?url=' + encodeURIComponent(um[0]))
+      fetch('/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' })
         .then(r => r.json()).then(info => {
           if (info && info.poi) { window.location.href = (ver === 'v6' ? urlV6(info.poi) : urlV8(info.poi)); }
           else toast('解析失败，请确认是美团店铺分享链接');
@@ -886,7 +886,7 @@ async function quickJumpFromClipboard() {
   if (!um) { toast('剪贴板里没有美团链接'); return; }
   toast('正在解析店铺…');
   try {
-    const r = await fetch('/resolve?url=' + encodeURIComponent(um[0]));
+    const r = await fetch('/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' });
     const info = await r.json().catch(() => ({}));
     if (info && info.poi) {
       // 领券同时自动保存商家信息到下方卡片（含店名/头像），便于以后一键复领
