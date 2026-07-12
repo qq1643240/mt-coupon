@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.45'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.46'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -113,7 +113,8 @@ function injectIcons() {
   set('addBtn', ICON.plus);
   set('searchClear', ICON.close);
   set('claimIc', ICON.ticket);
-  set('qjIc', ICON.bolt);
+  set('qjIcV8', ICON.bolt);
+  set('qjIcV6', ICON.bolt);
 }
 function extractPoi(url) {
   const m = String(url || '').match(/poi_id_str=([^&\s"'<>\\]+)/);
@@ -337,18 +338,37 @@ function drawClaim() {
   $('#empty').classList.toggle('hidden', arr.length > 0);
   arr.forEach(it => {
     const isMini = isMiniProgramLink(it.url);
+    const url = it.url || '';
+    const addrLabel = isMini ? '微领券地址' : '领取地址';
     const card = document.createElement('div');
     card.className = 'card act-card' + (isMini ? ' act-mini' : '');
     card.innerHTML = `
-      <div class="card-top">
+      <div class="card-top" data-act="open">
         <div class="shop-meta">
           <div class="card-name" title="${esc(it.title || '')}">${esc(it.title || '未命名活动')}</div>
+          <div class="card-sub"><span>${isMini ? '<b style="color:#07c160">微信小程序</b> · 点击唤起微信领取' : '点击跳转领取'}</span></div>
           ${it.note ? `<div class="card-sub"><span>${esc(it.note)}</span></div>` : ''}
         </div>
         <div class="card-pin">${ICON.open}</div>
       </div>
-      <div class="card-addr" data-act="open"><span class="ca-label">${isMini ? '<b style="color:#07c160">微信</b> · ' : ''}${esc(it.url || '')}</span><span class="copy">${ICON.open}</span></div>`;
-    card.addEventListener('click', () => { if (it.url) smartOpen(it.url); });
+      <div class="card-addr" data-act="copy" title="点击复制${addrLabel}"><span class="ca-label">${esc(addrLabel)} · ${esc(url)}</span><span class="copy">${ICON.copy}</span></div>`;
+    // 顶部区域：打开链接（小程序链接自动唤起微信 App）
+    const openEl = card.querySelector('[data-act="open"]');
+    if (openEl) openEl.addEventListener('click', () => { if (url) smartOpen(url); });
+    // 地址小横条：点击自动复制（不触发打开）
+    const copyEl = card.querySelector('[data-act="copy"]');
+    if (copyEl) copyEl.addEventListener('click', e => {
+      e.stopPropagation();
+      if (!url) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+          toast('已复制' + addrLabel);
+          copyEl.classList.add('copied');
+          const c = copyEl.querySelector('.copy'); if (c) c.innerHTML = ICON.check;
+          setTimeout(() => { copyEl.classList.remove('copied'); if (c) c.innerHTML = ICON.copy; }, 1200);
+        }, () => toast('复制失败'));
+      } else toast(url);
+    });
     LIST.appendChild(card);
   });
 }
@@ -932,9 +952,7 @@ function handleDeepLink() {
     let ver = 'v8';
     const vm = String(jkclip).match(/^v?([68])$/);
     if (vm) ver = 'v' + vm[1];
-    qjVer = ver;
-    document.querySelectorAll('.qj-ver-btn').forEach(x => x.classList.toggle('active', x.dataset.ver === ver));
-    quickJumpFromClipboard();
+    quickJumpFromClipboard(ver);
     history.replaceState(null, '', location.pathname);
     return;
   }
@@ -1032,7 +1050,9 @@ async function getClipboardText() {
   return await manualPasteClipboard();
 }
 
-async function quickJumpFromClipboard() {
+async function quickJumpFromClipboard(ver) {
+  ver = (ver === 'v6') ? 'v6' : (ver === 'v8' ? 'v8' : qjVer); // 允许指定版本；缺省用全局（供 ?jkclip 深链复用）
+  qjVer = ver;
   const text = await getClipboardText();
   if (!text || !text.trim()) { toast('未获取到链接，请先复制美团分享链接'); return; }
   const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
@@ -1046,10 +1066,10 @@ async function quickJumpFromClipboard() {
       const name = (info.name && isValidShopName(info.name)) ? info.name : extractName(text);
       const it = autoSave(info.poi, { name, logo: info.logo || null });
       it.claimed = true; it.updatedAt = Date.now();
-      bumpStat(qjVer === 'v6' ? 2 : 1);
+      bumpStat(ver === 'v6' ? 2 : 1);
       save(); render();
-      location.href = imeituanDeepLink(info.poi, qjVer); // 直接唤起美团 App（iOS 弹确认框）
-      toast('已收藏并唤起美团 App（' + (qjVer === 'v6' ? 'v6' : 'v8') + '）');
+      location.href = imeituanDeepLink(info.poi, ver); // 直接唤起美团 App（iOS 弹确认框）
+      toast('已收藏并唤起美团 App（' + ver + '）');
     } else if (info && info.poiNum) {
       toast('该链接只含数字店铺ID，无 poi_id_str，无法直跳');
     } else {
@@ -1057,11 +1077,8 @@ async function quickJumpFromClipboard() {
     }
   } catch (e) { toast('解析请求失败'); }
 }
-$('#qjClip').addEventListener('click', quickJumpFromClipboard);
-document.querySelectorAll('.qj-ver-btn').forEach(b => b.addEventListener('click', () => {
-  qjVer = b.dataset.ver;
-  document.querySelectorAll('.qj-ver-btn').forEach(x => x.classList.toggle('active', x === b));
-}));
+$('#qjClipV8').addEventListener('click', () => quickJumpFromClipboard('v8'));
+$('#qjClipV6').addEventListener('click', () => quickJumpFromClipboard('v6'));
 
 injectIcons();
 const _fv = document.getElementById('footVer'); if (_fv) _fv.textContent = 'v' + VERSION;

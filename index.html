@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#e9ebef" />
   <title>美团津贴 · 领券助手</title>
-  <link rel="stylesheet" href="styles.css?v=1.45" />
+  <link rel="stylesheet" href="styles.css?v=1.46" />
 </head>
 <body>
   <!-- 背景液态光晕（让毛玻璃透出层次） -->
@@ -49,16 +49,16 @@
       <!-- 标签筛选栏 -->
       <div class="tag-bar hidden" id="tagBar"></div>
 
-      <!-- 一键读剪贴板直跳美团 App 领券 -->
+      <!-- 一键读剪贴板直跳美团 App 领券（v8 / v6 各一个按钮，同一行） -->
       <div class="quickjump" id="quickjump">
-        <button class="qj-main" id="qjClip" type="button">
-          <span class="bi" id="qjIc"></span>
-          <span class="qj-txt">读剪贴板 · 直跳美团 App 领券</span>
+        <button class="qj-main" id="qjClipV8" data-ver="v8" type="button">
+          <span class="bi" id="qjIcV8"></span>
+          <span class="qj-txt">读剪贴板 · v8 跳 App</span>
         </button>
-        <div class="qj-ver" id="qjVer">
-          <button class="qj-ver-btn active" data-ver="v8" type="button">v8 主券</button>
-          <button class="qj-ver-btn" data-ver="v6" type="button">v6 第二张</button>
-        </div>
+        <button class="qj-main qj-v6" id="qjClipV6" data-ver="v6" type="button">
+          <span class="bi" id="qjIcV6"></span>
+          <span class="qj-txt">读剪贴板 · v6 跳 App</span>
+        </button>
       </div>
     </header>
 
@@ -77,7 +77,8 @@
       <p>③ 点「领取」自动标记已领取并打开领取通道（v8 / v6 可切号）。</p>
       <p>④ 数据保存在本机浏览器，作者 <b>@6866</b>。</p>
       <p>⑤ iOS 快捷指令：复制美团分享链接后，用「打开 URL」跳转 <b>?url=链接</b> 自动识别详情；或 <b>?claim=商家poi</b> 直接跳美团领取。</p>
-      <p>⑥ 点「读剪贴板 · 直跳美团 App 领券」：自动读取美团分享链接 → 解析 → 唤起 App，<b>同时把该商家保存到下方卡片并标记已领</b>。HTTPS 站点自动读剪贴板；<b>宝塔 http://IP 站点会弹窗让你粘贴</b>（功能等效）。右侧可切 v8 主券 / v6 第二张。</p>
+      <p>⑥ 点「读剪贴板 · v8/v6 跳 App」：自动读取美团分享链接 → 解析 → 唤起 App，<b>同时把该商家保存到下方卡片并标记已领</b>。HTTPS 站点自动读剪贴板；<b>宝塔 http://IP 站点会弹窗让你粘贴</b>（功能等效）。v8 主券、v6 第二张各一个按钮。</p>
+      <p>⑦ 领券页：点卡片跳转领取（<b>#小程序链接自动唤起微信 App</b>），点下方地址小横条自动复制领取/微领券地址。</p>
     </div>
 
     <main id="list" class="list"></main>
@@ -89,7 +90,7 @@
 
     <footer class="foot">
       <span class="author">@6866</span><span class="foot-sep">·</span>
-      <span id="footVer">v1.45</span>
+      <span id="footVer">v1.46</span>
     </footer>
 
     <button id="addBtn" class="fab" title="新增" aria-label="新增"></button>
@@ -135,6 +136,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.45"></script>
+  <script src="app.js?v=1.46"></script>
 </body>
 </html>

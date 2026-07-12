@@ -240,29 +240,25 @@ body {
 }
 [data-theme="dark"] .note-pill { background: rgba(0,140,255,.15); color: #5ab0ff; border-color: rgba(0,140,255,.3); }
 
-/* 一键读剪贴板直跳 App */
-.quickjump { display: flex; flex-direction: column; gap: 9px; margin: 12px 0 2px; }
+/* 一键读剪贴板直跳 App（v8 / v6 同一行两个按钮） */
+.quickjump { display: flex; flex-direction: row; gap: 9px; margin: 12px 0 2px; }
 .qj-main {
-  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
-  width: 100%; border: none; cursor: pointer;
-  padding: 14px 16px; border-radius: 16px;
-  font-size: 15px; font-weight: 700; color: #1c1c1e;
+  flex: 1; min-width: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: none; cursor: pointer;
+  padding: 13px 10px; border-radius: 15px;
+  font-size: 13.5px; font-weight: 700; color: #1c1c1e; white-space: nowrap;
   background: linear-gradient(135deg, #FFE08A, #FFC93C);
   box-shadow: 0 6px 18px rgba(255,201,60,.4), inset 0 1px 0 rgba(255,255,255,.5);
   transition: transform .12s, box-shadow .2s, filter .2s;
 }
+.qj-main.qj-v6 {
+  background: linear-gradient(135deg, #FFD3A5, #FF9F55);
+  box-shadow: 0 6px 18px rgba(255,159,85,.4), inset 0 1px 0 rgba(255,255,255,.5);
+}
 .qj-main:active { transform: scale(.97); filter: brightness(.97); }
 .qj-main .bi { display: inline-flex; }
-.qj-main .bi .ic { width: 19px; height: 19px; color: #1c1c1e; }
-.qj-ver { display: flex; gap: 8px; }
-.qj-ver-btn {
-  flex: 1; border: 1px solid var(--glass-border); cursor: pointer;
-  background: var(--glass); color: var(--muted);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-  padding: 9px 0; border-radius: 13px; font-size: 13px; font-weight: 600;
-  transition: color .2s, background .2s, border-color .2s;
-}
-.qj-ver-btn.active { color: var(--text); border-color: var(--ink); background: var(--glass-strong); }
+.qj-main .bi .ic { width: 18px; height: 18px; color: #1c1c1e; }
 
 /* ---------- 统计条 / 说明 ---------- */
 .statbar {
