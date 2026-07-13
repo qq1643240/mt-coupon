@@ -9,6 +9,16 @@ const port = process.env.PORT || 8123;
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 const crypto = require('crypto');
 
+/* ---- SSRF 防护：服务端只跟随白名单域名（防止被用作内网/外网 SSRF 跳板）---- */
+const ALLOWED_HOSTS = ['meituan.com', 'dianping.com', 'dpurl.cn', 'meishi.com'];
+function hostAllowed(hostname) {
+  if (!hostname) return false;
+  const h = String(hostname).toLowerCase();
+  return ALLOWED_HOSTS.some(d => h === d || h.endsWith('.' + d));
+}
+/* 同步接口签名（HMAC-SHA256）；HTTPS 环境下客户端用 Web Crypto 计算，服务端校验 */
+function hmacSync(key, data) { return crypto.createHmac('sha256', key).update(data).digest('hex'); }
+
 /* ---- 后台管理：活动链接 / 定位点（JSON 文件存储）---- */
 const dataDir = path.join(root, 'data');
 try { fs.mkdirSync(dataDir, { recursive: true }); } catch (e) {}
@@ -16,8 +26,9 @@ function loadJson(fp, def) { try { return JSON.parse(fs.readFileSync(fp, 'utf8')
 function saveJson(fp, v) { try { fs.writeFileSync(fp, JSON.stringify(v, null, 2)); } catch (e) {} }
 function str(v, n) { return String(v == null ? '' : v).slice(0, n); }
 
-/* ---- 后台登录令牌（内存，重启失效；个人自用足够）---- */
-const adminTokens = new Set();
+/* ---- 后台登录令牌（内存，重启失效；带过期时间，个人自用足够）---- */
+const adminTokens = new Map(); // token -> 过期时间戳(ms)
+const TOKEN_TTL = 24 * 3600 * 1000;
 const ADMIN_PASS = process.env.ADMIN_PASS || 'mt6866admin';
 const adminFile = path.join(dataDir, 'admin.json');
 function readAdminPass() {
@@ -35,6 +46,9 @@ function readBody(req) {
   });
 }
 function authOk(req) {
+  // 清理过期令牌
+  const now = Date.now();
+  for (const [t, exp] of adminTokens) if (exp <= now) adminTokens.delete(t);
   const h = req.headers['authorization'] || '';
   const m = h.match(/^Bearer\s+(.+)$/i);
   if (m && adminTokens.has(m[1])) return true;
@@ -82,12 +96,16 @@ function handleCrud(req, res, u, name, file, build) {
 }
 
 /* 服务端跟随重定向，取出最终 URL（Node 无跨域限制，可解析任意短链） */
-function follow(u, depth, cb) {
+function follow(u, depth, cb, opts) {
+  opts = opts || {};
+  const maxBytes = opts.maxBytes || 2 * 1024 * 1024; // 读取正文上限 ~2MB，防内存撑爆
+  const timeoutMs = opts.timeout || 15000;
   if (depth > 8) return cb(null, u);
   let urlObj;
   try { urlObj = new URL(u); } catch (e) { return cb(e); }
+  if (!hostAllowed(urlObj.hostname)) return cb(new Error('目标域名不在允许列表内'));
   const mod = urlObj.protocol === 'https:' ? https : http;
-  const opts = {
+  const reqOpts = {
     method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148',
@@ -96,7 +114,7 @@ function follow(u, depth, cb) {
   };
   let done = false;
   const finish = (e, url, body) => { if (done) return; done = true; cb(e, url, body); };
-  const rq = mod.request(u, opts, r => {
+  const rq = mod.request(u, reqOpts, r => {
     // 3xx 重定向 → 继续跟随
     if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) {
       const next = new URL(r.headers.location, u).href;
@@ -104,8 +122,13 @@ function follow(u, depth, cb) {
       return follow(next, depth + 1, cb);
     }
     // 200：读取正文（utf8），兼容 meta refresh / JS 跳转 / JSON 里的 poi
-    let buf = [];
-    r.on('data', c => buf.push(c));
+    let buf = [], size = 0, capped = false;
+    r.on('data', c => {
+      if (capped) return;
+      size += c.length;
+      if (size > maxBytes) { capped = true; r.destroy(); return; }
+      buf.push(c);
+    });
     r.on('end', () => {
       const body = Buffer.concat(buf).toString('utf8');
       // 处理 HTML <meta refresh> 或 JS location 跳转（部分短链不是 302 而是页面跳转）
@@ -121,7 +144,7 @@ function follow(u, depth, cb) {
     r.on('close', () => finish(null, urlObj.href, ''));
   });
   rq.on('error', e => finish(e));
-  rq.setTimeout(15000, () => { rq.destroy(); finish(new Error('timeout')); });
+  rq.setTimeout(timeoutMs, () => { rq.destroy(); finish(new Error('timeout')); });
   rq.end();
 }
 
@@ -197,6 +220,7 @@ function resolveJk(startUrl, cb) {
     if (done || depth > 12) return finish();
     let urlObj;
     try { urlObj = new URL(u); } catch (e) { return finish(); }
+    if (!hostAllowed(urlObj.hostname)) return finish();
     const mod = urlObj.protocol === 'https:' ? https : http;
     const opts = { method: 'GET', headers: { 'User-Agent': ua, 'Accept': '*/*' } };
     const rq = mod.request(u, opts, r => {
@@ -298,17 +322,7 @@ function extractLogo(s) {
     /<img[^>]+src=["'](https?:\/\/[a-z0-9.-]*\.(?:dpfile|dianping)\.[a-z]+[^"']*(?:\.jpg|\.jpeg|\.png|\.webp))["']/gi,
   ];
   for (const p of shopImgPatterns) { p.lastIndex = 0; let found; while ((found = p.exec(s))) { if (found[1] && !isPlatformLogo(found[1])) return found[1]; } }
-  // og:image 作为兜底
-  function extractMeta(s, prop) {
-    if (!s) return null;
-    let m = s.match(new RegExp('<meta[^>]+property=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
-    if (m) return m[1];
-    m = s.match(new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']?' + prop, 'i'));
-    if (m) return m[1];
-    m = s.match(new RegExp('<meta[^>]+name=["\']?' + prop + '["\']?[^>]+content=["\']([^"\']+)', 'i'));
-    if (m) return m[1];
-    return null;
-  }
+  // og:image 作为兜底（extractMeta 见文件底部全局定义）
   let v = extractMeta(s, 'og:image');
   if (v && !isPlatformLogo(v)) return v;
   v = extractMeta(s, 'twitter:image');
@@ -402,7 +416,7 @@ http.createServer((req, res) => {
     readBody(req).then(body => {
       let obj; try { obj = JSON.parse(body || '{}'); } catch (e) { obj = {}; }
       if (obj.pass === readAdminPass()) {
-        const tk = genToken(); adminTokens.add(tk);
+        const tk = genToken(); adminTokens.set(tk, Date.now() + TOKEN_TTL);
         res.setHeader('Set-Cookie', 'admin_token=' + tk + '; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax');
         res.writeHead(200, { 'Content-Type': types['.json'] });
         res.end(JSON.stringify({ ok: true, token: tk }));
@@ -582,10 +596,10 @@ http.createServer((req, res) => {
       'https://m.dianping.com/appshare/shop/' + poi,
       'https://waimai.meituan.com/restaurant/' + poi
     ];
-    (function tryNext(i) {
-      if (i >= candidates.length) { res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, poi, logo: null, name: null })); return; }
-      follow(candidates[i], 0, (err, finalUrl, body) => {
-        if (err || !body) return tryNext(i + 1);
+    // 并发请求多个候选地址，取第一个拿到头像/店名的（单条超时 7s，整体更快）
+    Promise.all(candidates.map(c => new Promise(resolve => {
+      follow(c, 0, (err, finalUrl, body) => {
+        if (err || !body) return resolve(null);
         const logo = extractLogo(body);
         let name = null;
         try {
@@ -596,16 +610,15 @@ http.createServer((req, res) => {
           // 最终校验：纯平台名/过短/无意义 → 视为无效
           if (name && (/^(美团|大众点评|美团外卖|Meituan|Dianping)$/.test(name) || name.length < 2)) name = null;
         } catch (e) {}
-        if (logo || name) {
-          let logoUrl = null;
-          if (logo) try { logoUrl = new URL(logo, finalUrl).href; } catch (e) {}
-          res.writeHead(200, { 'Content-Type': types['.json'] });
-          res.end(JSON.stringify({ ok: true, poi, logo: logoUrl || null, name: name || null }));
-        } else {
-          tryNext(i + 1);
-        }
-      });
-    })(0);
+        let logoUrl = null;
+        if (logo) try { logoUrl = new URL(logo, finalUrl).href; } catch (e) {}
+        resolve((logoUrl || name) ? { poi, logo: logoUrl || null, name: name || null } : null);
+      }, { timeout: 7000, maxBytes: 2 * 1024 * 1024 });
+    }))).then(results => {
+      const ok = results.find(r => r);
+      if (ok) { res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, ...ok })); }
+      else { res.writeHead(200, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: true, poi, logo: null, name: null })); }
+    });
     return;
   }
 
@@ -671,9 +684,17 @@ http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store, private, must-revalidate');
     const key = safeSyncKey(u.searchParams.get('key'));
-    if (!key) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'missing key' })); return; }
+    if (!key || key.length < 6) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'missing/invalid key' })); return; }
     const fp = path.join(syncDir, key + '.json');
+    // 防篡改：HTTPS 环境下客户端用 Web Crypto 计算 mac=HMAC(key, method|/sync|body)，服务端校验；
+    // 若客户端未传 mac（如 http 宝塔环境无 crypto.subtle），仅以 key 作为共享密钥放行。
+    const verifyMac = (body) => {
+      const provided = u.searchParams.get('mac') || '';
+      if (!provided) return true;
+      return provided === hmacSync(key, req.method + '|/sync|' + body);
+    };
     if (req.method === 'GET') {
+      if (!verifyMac('')) { res.writeHead(403, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: '签名校验失败' })); return; }
       if (fs.existsSync(fp)) {
         try { const arr = JSON.parse(fs.readFileSync(fp, 'utf8')); res.end(JSON.stringify({ ok: true, data: arr })); }
         catch (e) { res.end(JSON.stringify({ ok: true, data: null })); }
@@ -687,6 +708,7 @@ http.createServer((req, res) => {
     req.on('data', c => { sChunks.push(c); sSize += c.length; if (sSize > 5 * 1024 * 1024) req.destroy(); });
     req.on('end', () => {
       const body = Buffer.concat(sChunks).toString('utf8');
+      if (!verifyMac(body)) { res.writeHead(403, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: '签名校验失败' })); return; }
       let arr; try { arr = JSON.parse(body); } catch (e) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'invalid json' })); return; }
       if (!Array.isArray(arr)) { res.writeHead(400, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'data must be array' })); return; }
       try { fs.writeFileSync(fp, JSON.stringify(arr)); } catch (e) { res.writeHead(500, { 'Content-Type': types['.json'] }); res.end(JSON.stringify({ ok: false, error: 'write failed' })); return; }
@@ -702,7 +724,13 @@ http.createServer((req, res) => {
   if (!fp.startsWith(root)) { res.writeHead(403); res.end('forbidden'); return; }
   fs.readFile(fp, (e, d) => {
     if (e) { res.writeHead(404); res.end('404'); return; }
-    res.writeHead(200, { 'Content-Type': types[path.extname(fp)] || 'text/plain; charset=utf-8' });
+    const ext = path.extname(fp);
+    const headers = { 'Content-Type': types[ext] || 'text/plain; charset=utf-8' };
+    // 指纹化静态资源（app.js?v=、styles.css?v=）长缓存，HTML 不缓存（已在上方设置 no-store）
+    if ((ext === '.js' || ext === '.css') && !fp.endsWith('index.html')) {
+      headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+    }
+    res.writeHead(200, headers);
     res.end(d);
   });
 }).listen(port, () => console.log('本地服务已启动: http://localhost:' + port + '  (含 /resolve 短链解析)'));

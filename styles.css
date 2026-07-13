@@ -557,6 +557,16 @@ body {
 .clip-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .clip-actions .btn { padding: 10px 16px; }
 
+/* 统一确认 / 输入弹窗的输入框（风格与 .field input 对齐） */
+.confirm-input {
+  width: 100%; box-sizing: border-box;
+  background: var(--glass); border: 1px solid var(--glass-border); border-radius: 13px;
+  padding: 11px 12px; color: var(--text); font-size: 16px; outline: none; font-family: inherit;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.confirm-input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(28,28,30,.1); }
+.clip-card #confirmMsg { font-size: 13.5px; color: var(--text); line-height: 1.6; }
+
 .kbd {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
   background: var(--glass); border: 1px solid var(--glass-border); border-radius: 6px; padding: 1px 6px; color: var(--muted);

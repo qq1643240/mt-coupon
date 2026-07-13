@@ -8,3 +8,16 @@ preview_urls = true
 [assets]
 directory = "."
 not_found_handling = "single-page-application"
+
+# 后台管理存储（领券 / 定位 / 令牌 / 密码）：绑定 KV 命名空间
+# 用 `npx wrangler kv namespace create ADMIN_KV` 创建后，把返回的 id 填到下面。
+[[kv_namespaces]]
+binding = "ADMIN_KV"
+id = "在这里填入 wrangler 返回的 KV id"
+
+# 后台默认密码（首次登录用；登录后可在后台改密，改后写入 KV 覆盖此值）
+# 密码已移出仓库，改为 Cloudflare Secret 存储，部署前执行：
+#   npx wrangler secret put ADMIN_PASS
+# 然后输入密码（当前为 6866）。未设置时回退到内置默认值。
+# [vars]
+# ADMIN_PASS = "6866"

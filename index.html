@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#e9ebef" />
   <title>美团津贴 · 领券助手</title>
-  <link rel="stylesheet" href="styles.css?v=1.46" />
+  <link rel="stylesheet" href="styles.css?v=1.47" />
 </head>
 <body>
   <!-- 背景液态光晕（让毛玻璃透出层次） -->
@@ -90,7 +90,7 @@
 
     <footer class="foot">
       <span class="author">@6866</span><span class="foot-sep">·</span>
-      <span id="footVer">v1.46</span>
+      <span id="footVer">v1.47</span>
     </footer>
 
     <button id="addBtn" class="fab" title="新增" aria-label="新增"></button>
@@ -121,6 +121,22 @@
 
     <div id="toast" class="toast hidden"></div>
 
+    <!-- 统一确认 / 输入弹窗（替代原生 confirm / prompt，风格统一） -->
+    <div id="confirmModal" class="clip-modal hidden">
+      <div class="modal-backdrop" id="confirmBackdrop"></div>
+      <div class="clip-card">
+        <h3 id="confirmTitle">确认</h3>
+        <p id="confirmMsg"></p>
+        <div id="confirmInputWrap" class="hidden">
+          <input id="confirmInput" type="text" class="confirm-input" />
+        </div>
+        <div class="clip-actions">
+          <button class="btn" id="confirmCancel" type="button">取消</button>
+          <button class="btn btn-primary" id="confirmOk" type="button">确定</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 非安全上下文（http 站点）读剪贴板降级：站内粘贴弹窗 -->
     <div id="clipModal" class="clip-modal hidden">
       <div class="modal-backdrop" id="clipBackdrop"></div>
@@ -136,6 +152,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.46"></script>
+  <script src="app.js?v=1.47"></script>
 </body>
 </html>

@@ -13,6 +13,12 @@ function json(data, status = 200) {
   });
 }
 
+/* SSRF 防护：只跟随白名单域名（防止被用作 SSRF 跳板） */
+const ALLOWED_HOSTS = ['meituan.com', 'dianping.com', 'dpurl.cn', 'meishi.com'];
+function hostAllowedSafe(u) {
+  try { const h = new URL(u).hostname.toLowerCase(); return ALLOWED_HOSTS.some(d => h === d || h.endsWith('.' + d)); } catch { return false; }
+}
+
 function buildClaim(poi, ver) {
   const base = 'https://offsiteact.meituan.com/web/hoae/collection_waimai_' + ver + '/index.html';
   const params = new URLSearchParams({
@@ -37,6 +43,7 @@ function buildClaim(poi, ver) {
 
 async function follow(u, ua, depth) {
   if (depth > 8) return { url: u, body: '' };
+  if (!hostAllowedSafe(u)) throw new Error('目标域名不在允许列表内');
   let r;
   try {
     r = await fetch(u, {
@@ -61,7 +68,8 @@ async function follow(u, ua, depth) {
     }
   }
 
-  const body = await r.text().catch(() => '');
+  let body = await r.text().catch(() => '');
+  if (body.length > 2 * 1024 * 1024) body = body.slice(0, 2 * 1024 * 1024); // 正文上限 ~2MB，防内存占用
   const meta = body.match(/http-equiv=["']?refresh["']?[^>]*url=([^"'>\s]+)/i);
   const js = body.match(/location(?:\.href)?\s*=\s*["']([^"']+)["']/i)
     || body.match(/href\s*=\s*["']([^"']*(?:poi_id_str|waimai\.meituan)[^"']*)["']/i);
@@ -441,7 +449,8 @@ export default {
         'https://waimai.meituan.com/restaurant/' + poi
       ];
       const ua = 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148';
-      for (const c of candidates) {
+      // 并发请求所有候选地址，取第一个成功拿到头像/店名的（更快）
+      const results = await Promise.all(candidates.map(async c => {
         try {
           const final = await follow(c, ua, 0);
           const logo = extractLogo(final.body);
@@ -452,14 +461,13 @@ export default {
             if (nv) name = nv.replace(/\s*[-–|—|·]\s*(美团|大众点评|外卖|优惠券|领券).*$/i, '').replace(/^\s+|\s+$/g, '');
             if (name) name = name.replace(/\s*[-–|]\s*(在线点餐|配送中|正在营业|已打烊|美团外卖|外卖).*/i, '').trim();
           } catch (e) {}
-          if (logo || name) {
-            let logoUrl = null;
-            if (logo) try { logoUrl = new URL(logo, final.url).href; } catch (e) {}
-            return json({ ok: true, poi, logo: logoUrl || null, name: name || null });
-          }
-        } catch (e) { continue; }
-      }
-      return json({ ok: true, poi, logo: null, name: null });
+          let logoUrl = null;
+          if (logo) try { logoUrl = new URL(logo, final.url).href; } catch (e) {}
+          return (logoUrl || name) ? { poi, logo: logoUrl || null, name: name || null } : null;
+        } catch (e) { return null; }
+      }));
+      const ok = results.find(r => r);
+      return json(ok ? { ok: true, ...ok } : { ok: true, poi, logo: null, name: null });
     }
 
     /* 短链/直链解析接口（跟随重定向取出 poi_id_str） */

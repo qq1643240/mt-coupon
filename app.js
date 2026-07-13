@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.46'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.47'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -81,6 +81,48 @@ function toast(msg) {
 function $(s) { return document.querySelector(s); }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function escAttr(s) { return esc(s); }
+
+/* ---------- 统一确认 / 输入弹窗（替代原生 confirm / prompt，风格统一） ---------- */
+let _confirmResolve = null;
+function showConfirmModal(opts) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    const modal = document.getElementById('confirmModal');
+    document.getElementById('confirmTitle').textContent = opts.title || '确认';
+    document.getElementById('confirmMsg').textContent = opts.msg || '';
+    const wrap = document.getElementById('confirmInputWrap');
+    const input = document.getElementById('confirmInput');
+    if (opts.input) { wrap.classList.remove('hidden'); input.value = opts.value || ''; setTimeout(() => input.focus(), 50); }
+    else { wrap.classList.add('hidden'); input.value = ''; }
+    modal.classList.remove('hidden');
+  });
+}
+function closeConfirmModal(result) {
+  const modal = document.getElementById('confirmModal');
+  modal.classList.add('hidden');
+  if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(result); }
+}
+document.getElementById('confirmOk').addEventListener('click', () => {
+  const wrap = document.getElementById('confirmInputWrap');
+  closeConfirmModal(wrap.classList.contains('hidden') ? true : document.getElementById('confirmInput').value);
+});
+document.getElementById('confirmCancel').addEventListener('click', () => closeConfirmModal(false));
+document.getElementById('confirmBackdrop').addEventListener('click', () => closeConfirmModal(false));
+function uiConfirm(msg, title) { return showConfirmModal({ msg, title }); }
+function uiPrompt(msg, def, title) { return showConfirmModal({ msg, title, input: true, value: def }); }
+
+/* 同步接口签名（HMAC-SHA256）：HTTPS 下用 Web Crypto 计算；http 环境无 crypto.subtle 则返回 null（服务端仅以 key 放行） */
+async function syncMac(key, data) {
+  try {
+    if (crypto && crypto.subtle) {
+      const enc = new TextEncoder();
+      const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const sig = await crypto.subtle.sign('HMAC', k, enc.encode(data));
+      return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {}
+  return null;
+}
 
 /* 统一 SVG 图标：等高、currentColor 描边、居中一致，解决 emoji 不对称 */
 const ICON = {
@@ -406,7 +448,7 @@ function drawLoc() {
 }
 
 /* ---------- 列表事件 ---------- */
-$('#list').addEventListener('click', e => {
+$('#list').addEventListener('click', async e => {
   if (curPage !== 'shop') return; // 领券/定位页的卡片点击由各自渲染时绑定，不走商家逻辑
   const addrEl = e.target.closest('[data-addr]');
   if (addrEl) {
@@ -441,7 +483,7 @@ $('#list').addEventListener('click', e => {
     if (a === 'claim') return claim(it, 1);
     if (a === 'claim2') return claim(it, 2);
     if (a === 'pin') { it.pinned = !it.pinned; it.updatedAt = Date.now(); save(); render(); toast(it.pinned ? '已置顶' : '已取消置顶'); return; }
-    if (a === 'del') { if (confirm(`确认删除「${it.name}」？`)) { data = data.filter(x => x.id !== it.id); save(); render(); toast('已删除'); } return; }
+    if (a === 'del') { if (await uiConfirm(`确认删除「${it.name}」？`)) { data = data.filter(x => x.id !== it.id); save(); render(); toast('已删除'); } return; }
     if (a === 'edit') return openEditor(it);
   }
   openDetail(it);
@@ -508,7 +550,7 @@ function openEditor(it) {
       });
     }
   });
-  if (editing) $('#delBtn').addEventListener('click', () => { if (confirm(`确认删除「${item.name}」？`)) { data = data.filter(x => x.id !== item.id); save(); render(); closeModal(); toast('已删除'); } });
+  if (editing) $('#delBtn').addEventListener('click', async () => { if (await uiConfirm(`确认删除「${item.name}」？`)) { data = data.filter(x => x.id !== it.id); save(); render(); closeModal(); toast('已删除'); } });
 }
 
 /* ---------- 详情（logo / 名称 / 地址 / 备注 / 领取） ---------- */
@@ -631,7 +673,7 @@ $('#helpToggle').addEventListener('click', () => {
 $('#menuBtn').addEventListener('click', () => paletteOpen(COMMANDS.slice(), '输入指令…'));
 function exportData() { const b = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `coupon-collection-${Date.now()}.json`; a.click(); toast('已导出'); }
 function importData() { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json'; inp.onchange = () => { const f = inp.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const arr = JSON.parse(r.result); if (Array.isArray(arr)) { data = arr; save(); render(); toast('导入成功'); } else toast('格式不正确'); } catch { toast('解析失败'); } }; r.readAsText(f); }; inp.click(); }
-function clearAll() { if (confirm('确认清空全部收藏？')) { data = []; save(); render(); toast('已清空'); } }
+async function clearAll() { if (await uiConfirm('确认清空全部收藏？')) { data = []; save(); render(); toast('已清空'); } }
 
 /* ---------- 跨设备同步（需宝塔版后端 /sync；云端 worker 暂不支持） ---------- */
 const SYNC_KEY = 'mt_coupon_sync_key';
@@ -643,9 +685,12 @@ function getSyncKey() {
 }
 async function syncUpload() {
   const key = getSyncKey();
-  if (!confirm('将把本机 ' + data.length + ' 个收藏上传并覆盖云端（同步码：' + key + '）。继续？')) return;
+  if (!await uiConfirm('将把本机 ' + data.length + ' 个收藏上传并覆盖云端（同步码：' + key + '）。继续？')) return;
   try {
-    const r = await fetch('/sync?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), cache: 'no-store' });
+    const body = JSON.stringify(data);
+    const mac = await syncMac(key, 'POST|/sync|' + body);
+    const url = '/sync?key=' + encodeURIComponent(key) + (mac ? '&mac=' + mac : '');
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     if (j && j.ok) toast('已上传同步（' + data.length + ' 个）');
     else toast('上传失败：' + (j && j.error || '未知'));
@@ -654,10 +699,12 @@ async function syncUpload() {
 async function syncDownload() {
   const key = getSyncKey();
   try {
-    const r = await fetch('/sync?key=' + encodeURIComponent(key), { cache: 'no-store' });
+    const mac = await syncMac(key, 'GET|/sync|');
+    const url = '/sync?key=' + encodeURIComponent(key) + (mac ? '&mac=' + mac : '');
+    const r = await fetch(url, { cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     if (j && j.ok && Array.isArray(j.data)) {
-      if (!confirm('将用云端 ' + j.data.length + ' 个收藏覆盖本机。继续？')) return;
+      if (!await uiConfirm('将用云端 ' + j.data.length + ' 个收藏覆盖本机。继续？')) return;
       data = j.data; save(); render(); toast('已下载同步（' + data.length + ' 个）');
     } else if (j && j.ok && !j.data) {
       toast('云端暂无数据，请先上传');
@@ -666,9 +713,9 @@ async function syncDownload() {
     }
   } catch (e) { toast('同步失败：当前后端可能不支持（请用宝塔版）'); }
 }
-function setSyncKey() {
+async function setSyncKey() {
   const cur = getSyncKey();
-  const v = window.prompt('设置同步码（跨设备保持一致即可共享数据）：', cur);
+  const v = await uiPrompt('设置同步码（跨设备保持一致即可共享数据）：', cur);
   if (v && v.trim()) { try { localStorage.setItem(SYNC_KEY, v.trim()); } catch (e) {} toast('同步码已设为：' + v.trim()); }
 }
 
@@ -723,7 +770,7 @@ async function handleLinkSearch(v) {
   // 检测是否包含多条链接 → 批量识别
   const allUrls = extractAllUrls(v);
   if (allUrls.length > 1) {
-    const ok = confirm(`检测到 ${allUrls.length} 个商家链接，是否全部识别并添加到收藏？`);
+    const ok = await uiConfirm(`检测到 ${allUrls.length} 个商家链接，是否全部识别并添加到收藏？`);
     if (!ok) { setSearching(false); return; }
     setSearching(true);
     let added = 0;
@@ -772,10 +819,10 @@ async function handleLinkSearch(v) {
 }
 
 /* ---------- 批量领取全部（生成一页，逐张点开，绕过弹窗拦截） ---------- */
-function batchClaimAll() {
+async function batchClaimAll() {
   const items = data.filter(i => i.poi);
   if (!items.length) { toast('暂无收藏商家，请先搜索添加'); return; }
-  if (!confirm(`生成批量领券页？共 ${items.length} 个商家（v8 主券 + v6 第二张，逐张点开）`)) return;
+  if (!await uiConfirm(`生成批量领券页？共 ${items.length} 个商家（v8 主券 + v6 第二张，逐张点开）`)) return;
   let html = '<!doctype html><meta charset="utf-8"><title>批量领券</title>'
     + '<meta name="viewport" content="width=device-width,initial-scale=1">'
     + '<style>body{font-family:-apple-system,Segoe UI,PingFang SC,sans-serif;background:#f3f4f7;color:#111;padding:18px;max-width:560px;margin:0 auto}'
@@ -1093,7 +1140,7 @@ handleDeepLink();
   if (prev && prev !== VERSION) {
     setTimeout(() => {
       toast('已更新到 v' + VERSION + '，正在刷新…');
-      setTimeout(() => location.reload(true), 1200);
+      setTimeout(() => location.reload(), 1200);
     }, 700);
   }
   try { localStorage.setItem(k, VERSION); } catch (e) {}
