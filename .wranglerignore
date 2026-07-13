@@ -1,0 +1,18 @@
+# 这些文件/目录是 Node 版（宝塔）运行时与测试产物，不能打包进 Cloudflare 静态资源
+# 否则会作为公开静态文件可被任何人读取（如 data/admin.json 含密码哈希、sync/ 含同步数据）
+data/
+sync/
+*.log
+out.log
+err.log
+server.js
+webhook.js
+test_clipboard.mjs
+test_server.mjs
+.github/
+node_modules/
+package.json
+package-lock.json
+README.md
+start.bat
+wrangler.toml

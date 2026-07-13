@@ -13,7 +13,7 @@ not_found_handling = "single-page-application"
 # 用 `npx wrangler kv namespace create ADMIN_KV` 创建后，把返回的 id 填到下面。
 [[kv_namespaces]]
 binding = "ADMIN_KV"
-id = "在这里填入 wrangler 返回的 KV id"
+id = "8aae838d29764033883709e9ba98d25f"
 
 # 后台默认密码（首次登录用；登录后可在后台改密，改后写入 KV 覆盖此值）
 # 密码已移出仓库，改为 Cloudflare Secret 存储，部署前执行：
