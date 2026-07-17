@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#e9ebef" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
   <title>领券助手</title>
-  <link rel="stylesheet" href="styles.css?v=1.57" />
+  <link rel="stylesheet" href="styles.css?v=1.59" />
 </head>
 <body>
   <!-- 背景液态光晕（让毛玻璃透出层次） -->
@@ -88,7 +88,7 @@
       <p>③ 点「领取」自动标记已领取并打开领取通道（v8 / v6 可切号）。</p>
       <p>④ 数据保存在本机浏览器，作者 <b>@6866</b>。</p>
       <p>⑤ iOS 快捷指令：复制美团分享链接后，用「打开 URL」跳转 <b>?url=链接</b> 自动识别详情；或 <b>?claim=商家poi</b> 直接跳美团领取。</p>
-      <p>⑥ 打开本页<b>全自动读剪贴板</b>：识别到 poi_id_str 直接跳美团津贴页（v8主券），无需点击；可点「取消」留在本页再手动选 v6。无POI则提示缺少链接。HTTP站点需手动粘贴。</p>
+      <p>⑥ 打开本页<b>全自动读剪贴板</b>：自动识别 poi_id_str，并判断属于「美团」还是「美团外卖」，唤起对应 App 的商家津贴页（v8主券），无需点击；可点「取消」留在本页再手动选 v6 / 切换 App。无POI则提示缺少链接。HTTP站点需手动粘贴。</p>
       <p>⑦ 领券页：点卡片跳转领取（<b>#小程序链接自动唤起微信 App</b>），点下方地址小横条自动复制领取/微领券地址。</p>
     </div>
 
@@ -101,7 +101,7 @@
 
     <footer class="foot">
       <span class="author">@6866</span><span class="foot-sep">·</span>
-      <span id="footVer">v1.57</span>
+      <span id="footVer">v1.59</span>
     </footer>
 
     <button id="addBtn" class="fab" title="新增" aria-label="新增"></button>
@@ -163,6 +163,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.57"></script>
+  <script src="app.js?v=1.59"></script>
 </body>
 </html>

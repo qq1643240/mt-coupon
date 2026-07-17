@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.57'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.59'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -50,6 +50,26 @@ function buildUrl(poi, ver) {
 }
 function urlV8(poi) { return buildUrl(poi, 'v8'); }
 function urlV6(poi) { return buildUrl(poi, 'v6'); }
+
+/* 美团 App / 美团外卖 App 的 scheme 与中文名（剪贴板自动跳转时区分唤起哪个 App） */
+const APP_SCHEME = { main: 'imeituan://', waimai: 'imeituanwaimai://' };
+const APP_LABEL = { main: '美团', waimai: '美团外卖' };
+function appScheme(appType) { return APP_SCHEME[appType === 'main' ? 'main' : 'waimai']; }
+function appLabel(appType) { return APP_LABEL[appType === 'main' ? 'main' : 'waimai']; }
+
+/* 从分享文本/链接判断该商家属于「美团」(到店/团购) 还是「美团外卖」，从而唤起对应 App */
+function detectApp(text, url) {
+  const u = String(url || '').toLowerCase();
+  const t = String(text || '').toLowerCase();
+  // 外卖特征（链接域名 / 关键词）
+  if (/waimai\.meituan\.com|h5\.waimai\.meituan\.com|meituanwaimai/.test(u)
+    || /\bwaimai\b|外卖|美团外卖|闪购|配送/.test(t)) return 'waimai';
+  // 主 App 特征（到店/团购 / 点评）
+  if (/www\.meituan\.com|meituan\.com\/(?!waimai)|dianping\.com/.test(u)
+    || /\bmeituan\b|美团|大众点评|到店|团购/.test(t)) return 'main';
+  // 兜底：商家津贴以美团外卖为主
+  return 'waimai';
+}
 
 function ts(y, mo, d, h, mi, s) { return new Date(y, mo - 1, d, h, mi, s).getTime(); }
 
@@ -748,8 +768,9 @@ function autoSave(poi, opts) {
   if (it) {
     it.updatedAt = Date.now();
     if (opts.name && (!it.name || it.name === '该店铺')) it.name = opts.name;
+    if (opts.app) it.app = opts.app;
   } else {
-    it = { id: uid(), name: opts.name || '该店铺', poi, amount: '', logo: '', note: '', tags: [], pinned: false, claimed: false, updatedAt: Date.now() };
+    it = { id: uid(), name: opts.name || '该店铺', poi, amount: '', logo: '', note: '', tags: [], pinned: false, claimed: false, updatedAt: Date.now(), app: opts.app || 'waimai' };
     data.push(it);
   }
   save(); render();
@@ -1062,19 +1083,21 @@ function handleDeepLink() {
 let clipInfo = { name: '', poi: null, url: '' };
 let clipJumpTimer = null;
 
-function imeituanDeepLink(poi, ver) {
+function imeituanDeepLink(poi, ver, appType) {
   const activityUrl = buildUrl(poi, ver); // offsiteact.meituan.com 津贴 H5
-  return 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
+  const scheme = appScheme(appType);      // 美团外卖 → imeituanwaimai:// / 美团 → imeituan://
+  return scheme + 'www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
 }
 
-/* 执行跳转：标记已领 + 统计 + 唤起 App */
-function doJumpClaim(poi, ver) {
+/* 执行跳转：标记已领 + 统计 + 唤起对应 App */
+function doJumpClaim(poi, ver, appType) {
+  appType = appType === 'main' ? 'main' : 'waimai';
   const it = data.find(d => d.poi === poi);
-  if (it) { it.claimed = true; it.updatedAt = Date.now(); }
+  if (it) { it.claimed = true; it.updatedAt = Date.now(); if (!it.app) it.app = appType; }
   bumpStat(ver === 'v6' ? 2 : 1);
   save();
-  location.href = imeituanDeepLink(poi, ver);
-  if (it) toast('已跳转：' + it.name);
+  location.href = imeituanDeepLink(poi, ver, appType);
+  if (it) toast('已唤起' + appLabel(appType) + '：' + it.name);
 }
 
 /* 读取剪贴板文本：安全上下文优先，非安全降级为站内粘贴弹窗 */
@@ -1133,7 +1156,10 @@ function parseClipText(text) {
   // 提取店名
   name = url ? (extractName(s) || (poi ? '美团店铺' : '')) : s.substring(0, 50);
 
-  return { name, poi, url };
+  // 判断所属 App（美团 / 美团外卖）
+  const app = detectApp(s, url);
+
+  return { name, poi, url, app };
 }
 
 /* 短链域名判断（dpurl.cn 等需展开才能拿到 poi_id_str） */
@@ -1272,15 +1298,15 @@ async function processClipText(text) {
   try {
     if (!text || !text.trim()) { showClipRow('clipRowIdle'); return; }
     const info = parseClipText(text);
-    if (!info.name) { showClipRow('clipRowIdle'); return; }
+    if (!info.name && !info.url) { showClipRow('clipRowIdle'); return; }
     clipInfo = info;
 
     // 有 POI → 直接跳转
     if (info.poi) {
-      const it = autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
+      const it = autoSave(info.poi, { name: info.name || '该店铺', logo: null, app: info.app }); save();
       document.getElementById('clipShopName').textContent = info.name;
       showClipRow('clipRowJump');
-      startAutoJump(info.poi);
+      startAutoJump(info.poi, info.app);
       render();
       return;
     }
@@ -1290,17 +1316,35 @@ async function processClipText(text) {
       document.querySelector('#clipRowLoading .clip-msg').textContent = '展开链接中…';
       showClipRow('clipRowLoading');
 
-      const result = await expandShortLink(info.url);
-      if (result) {
-        const p = extractPoi(result);
-        if (p) { info.poi = p; info.url = result; clipInfo = info; }
+      // 优先服务端 /resolve（无跨域限制，可解析 dpurl.cn 等点评短链的 JS/meta 跳转）；失败再前端展开兜底
+      if (!info.poi) {
+        try {
+          const r = await fetch('/resolve?url=' + encodeURIComponent(info.url), { cache: 'no-store' });
+          const j = await r.json().catch(() => null);
+          if (j && j.poi) {
+            info.poi = j.poi;
+            if (j.finalUrl) info.url = j.finalUrl;
+            if (!info.name && j.name) info.name = j.name;
+            if (j.logo) info.logo = j.logo;
+            info.app = detectApp(j.finalUrl || info.url, j.finalUrl || info.url);
+          }
+        } catch (e) {}
+      }
+      // 服务端没拿到 poi → 再试前端展开短链
+      if (!info.poi) {
+        const result = await expandShortLink(info.url);
+        if (result) {
+          const p = extractPoi(result);
+          if (p) { info.poi = p; info.url = result; info.app = detectApp(result, result); }
+        }
       }
 
       if (info.poi) {
-        autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
+        clipInfo = info;
+        autoSave(info.poi, { name: info.name || '该店铺', logo: info.logo || null, app: info.app }); save();
         document.getElementById('clipShopName').textContent = info.name;
         showClipRow('clipRowJump');
-        startAutoJump(info.poi);
+        startAutoJump(info.poi, info.app);
         render();
         return;
       }
@@ -1324,13 +1368,15 @@ async function processClipText(text) {
 }
 
 /* 启动倒计时自动跳转 */
-function startAutoJump(poi) {
+function startAutoJump(poi, appType) {
+  appType = appType === 'main' ? 'main' : 'waimai';
+  const label = appLabel(appType);
   let countdown = 2;
   const tick = () => {
     if (!clipJumpTimer) return;
-    if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(poi, 'v8'); return; }
+    if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(poi, 'v8', appType); return; }
     const el = document.getElementById('clipJumpMsg');
-    if (el) el.innerHTML = '已识别，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
+    if (el) el.innerHTML = '已识别为「' + label + '」商家，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
     countdown--; clipJumpTimer = setTimeout(tick, 1000);
     const c = document.getElementById('clipCancelJump');
     if (c) c.addEventListener('click', () => cancelAutoJump());
@@ -1366,9 +1412,9 @@ $('#clipArea').addEventListener('click', async e => {
         let countdown = 2;
         const tick = () => {
           if (!clipJumpTimer) return;
-          if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(re.poi, 'v8'); return; }
+          if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(re.poi, 'v8', re.app); return; }
           const el = document.getElementById('clipJumpMsg');
-          if (el) el.innerHTML = '已识别，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
+          if (el) el.innerHTML = '已识别为「' + appLabel(re.app) + '」商家，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
           countdown--; clipJumpTimer = setTimeout(tick, 1000);
           const c = document.getElementById('clipCancelJump');
           if (c) c.addEventListener('click', () => cancelAutoJump());
@@ -1384,13 +1430,13 @@ $('#clipArea').addEventListener('click', async e => {
 
 $('#clipV8').addEventListener('click', () => {
   cancelAutoJump();
-  if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v8');
+  if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v8', clipInfo.app);
   else toast('未识别到店铺 POI');
 });
 
 $('#clipV6').addEventListener('click', () => {
   cancelAutoJump();
-  if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v6');
+  if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v6', clipInfo.app);
   else toast('未识别到店铺 POI');
 });
 
@@ -1407,11 +1453,12 @@ async function quickJumpFromClipboard(ver) {
     const info = await r.json().catch(() => ({}));
     if (info && info.poi) {
       const name = (info.name && isValidShopName(info.name)) ? info.name : extractName(text);
-      const it = autoSave(info.poi, { name, logo: info.logo || null });
+      const appType = detectApp(text, info.finalUrl || (text.match(/https?:\/\/[^\s"'<>）)]+/) || [])[0] || '');
+      const it = autoSave(info.poi, { name, logo: info.logo || null, app: appType });
       it.claimed = true; it.updatedAt = Date.now();
       bumpStat(ver === 'v6' ? 2 : 1); save(); render();
-      location.href = imeituanDeepLink(info.poi, ver);
-      toast('已收藏并唤起美团 App（' + ver + '）');
+      location.href = imeituanDeepLink(info.poi, ver, appType);
+      toast('已收藏并唤起' + appLabel(appType) + '（' + ver + '）');
     } else if (info && info.poiNum) {
       toast('该链接只含数字店铺ID，无 poi_id_str，无法直跳');
     } else { toast('解析失败，请确认是美团店铺分享链接'); }

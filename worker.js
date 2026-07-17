@@ -101,6 +101,16 @@ function extractDeepLink(s) {
   if (schemeM && schemeM[1]) return schemeM[1].trim();
   return null;
 }
+// 根据分享文本/链接判断该商家属于「美团」(到店/团购) 还是「美团外卖」，从而唤起对应 App
+function appTypeFromSource(text, url) {
+  const u = String(url || '').toLowerCase();
+  const t = String(text || '').toLowerCase();
+  if (/waimai\.meituan\.com|h5\.waimai\.meituan\.com|meituanwaimai/.test(u)
+    || /\bwaimai\b|外卖|美团外卖|闪购|配送/.test(t)) return 'waimai';
+  if (/www\.meituan\.com|meituan\.com\/(?!waimai)|dianping\.com/.test(u)
+    || /\bmeituan\b|美团|大众点评|到店|团购/.test(t)) return 'main';
+  return 'waimai';
+}
 // 从美团页面提取店铺真实头像（排除平台 logo）
 function extractLogo(s) {
   if (!s) return null;
@@ -352,8 +362,10 @@ export default {
         const poi = foundPoi;
         // 构造美团领券活动页 URL（与 Scriptable 脚本一致）
         const activityUrl = buildClaim(poi, ver);
-        // imeituan:// 深链：iOS Safari 只认"页面内 JS 触发"，不认服务器 302 直跳 scheme，故走中转页
-        const appDeepLink = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
+        // 根据分享文本/链接判断唤起「美团」还是「美团外卖」App
+        const at = appTypeFromSource(text, h5ShopUrl || '');
+        const scheme = at === 'main' ? 'imeituan://' : 'imeituanwaimai://';
+        const appDeepLink = scheme + 'www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
         return appJumpPage(appDeepLink, activityUrl); // 兜底降级到 H5 领券页
       }
 
@@ -415,7 +427,9 @@ export default {
           return json({ ok: false, error: '未解析出 poi_id_str', _debug: { rawInput: target, extractedLink: link, finalUrl: final.url || null }, poiNum: poiNum || null }, 422);
         }
         const h5 = buildClaim(poi, ver);
-        const app = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(h5);
+        const at = appTypeFromSource(target, final.url || '');
+        const scheme = at === 'main' ? 'imeituan://' : 'imeituanwaimai://';
+        const app = scheme + 'www.meituan.com/web?url=' + encodeURIComponent(h5);
         // format=page → 返回中转页 HTML（由页面内 JS 触发 scheme 唤起 App，iOS Safari 可靠放行）
         if (format === 'page') {
           return appJumpPage(app, h5);

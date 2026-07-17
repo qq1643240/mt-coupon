@@ -172,6 +172,17 @@ function extractDeepLink(s) {
   return null;
 }
 
+/* 根据分享文本/链接判断该商家属于「美团」(到店/团购) 还是「美团外卖」，从而唤起对应 App */
+function appTypeFromSource(text, url) {
+  const u = String(url || '').toLowerCase();
+  const t = String(text || '').toLowerCase();
+  if (/waimai\.meituan\.com|h5\.waimai\.meituan\.com|meituanwaimai/.test(u)
+    || /\bwaimai\b|外卖|美团外卖|闪购|配送/.test(t)) return 'waimai';
+  if (/www\.meituan\.com|meituan\.com\/(?!waimai)|dianping\.com/.test(u)
+    || /\bmeituan\b|美团|大众点评|到店|团购/.test(t)) return 'main';
+  return 'waimai';
+}
+
 /* 返回"唤起 App 中转页"：页面加载即用 JS 触发 scheme（iOS Safari 只认页面内触发，不认服务器 302 跳 scheme）
    res: http.ServerResponse；app: imeituan:// 深链；h5: 兜底 H5 地址（App 未安装时降级打开），可为空 */
 function appJumpPage(res, app, h5) {
@@ -535,7 +546,9 @@ http.createServer((req, res) => {
       }
       if (foundPoi) {
         const activityUrl = buildClaim(foundPoi, ver);
-        const appDeepLink = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
+        const at = appTypeFromSource(text, h5ShopUrl || '');
+        const scheme = at === 'main' ? 'imeituan://' : 'imeituanwaimai://';
+        const appDeepLink = scheme + 'www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
         return appJumpPage(res, appDeepLink, activityUrl);
       }
       if (h5ShopUrl) {
@@ -667,7 +680,9 @@ http.createServer((req, res) => {
         return;
       }
       const h5 = buildClaim(poi, ver);
-      const app = 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(h5);
+      const at = appTypeFromSource(target, finalUrl || '');
+      const scheme = at === 'main' ? 'imeituan://' : 'imeituanwaimai://';
+      const app = scheme + 'www.meituan.com/web?url=' + encodeURIComponent(h5);
       if (format === 'page') { return appJumpPage(res, app, h5); }
       res.writeHead(200, { 'Content-Type': types['.json'] });
       res.end(JSON.stringify({ ok: true, poi, ver, app, h5, _debug: { rawInput: target.substring(0, 200), extractedLink: link, finalUrl: finalUrl || null } }));
