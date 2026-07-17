@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.54'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.55'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -1114,20 +1114,20 @@ function parseClipText(text) {
   const s = text.trim();
   let poi = null, url = '', name = '';
 
+  // 策略0：直接在原始全文中匹配 poi_id_str（分享话术里经常直接带这个）
+  const rawM = s.match(/poi_id_str[=:]([^&\s"'<>\\\u4e00-\u9fff]+)/);
+  if (rawM) { poi = decodeURIComponent(rawM[1].trim()); }
+
   // 策略1：通过 extractAllUrls 找所有链接，逐个提取 POI
-  const allUrls = extractAllUrls(s);
-  for (const u of allUrls) {
-    const p = extractPoi(u);
-    if (p) { poi = p; url = u; break; }
-  }
-
-  // 策略2：如果所有链接都没找到 POI，直接在原始文本中匹配 poi_id_str
   if (!poi) {
-    const rawM = s.match(/poi_id_str=([^&\s"'<>\\\u4e00-\u9fff]+)/);
-    if (rawM) { poi = decodeURIComponent(rawM[1]); url = extractUrl(s) || ''; }
+    const allUrls = extractAllUrls(s);
+    for (const u of allUrls) {
+      const p = extractPoi(u);
+      if (p) { poi = p; url = u; break; }
+    }
   }
 
-  // 策略3：extractUrl 兜底（可能捕获到 extractAllUrls 漏掉的 URL）
+  // 策略2：extractUrl 兜底获取链接 URL
   if (!url) url = extractUrl(s) || '';
 
   // 提取店名
@@ -1211,69 +1211,99 @@ function showClipRow(id) {
 async function initClipBoard() {
   if (curPage !== 'shop') return;
   showClipRow('clipRowLoading');
+
   let text = '';
   try {
-    if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
-      text = await navigator.clipboard.readText();
+    // iOS Safari: readText() 需要用户手势，页面自动加载可能被拒
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.readText) {
+      text = await navigator.clipboard.readText().catch(() => '');
     }
-  } catch (e) {}
-  if (!text || !text.trim()) { showClipRow('clipRowIdle'); return; }
+  } catch (e) { text = ''; }
 
+  // 没读到内容 → 显示空闲 + 延迟用 execCommand('paste') 兜底
+  if (!text || !text.trim()) {
+    showClipRow('clipRowIdle');
+    setTimeout(() => {
+      const el = document.getElementById('clipRowIdle');
+      if (!el || el.classList.contains('hidden')) return; // 用户已操作过
+      const ta = document.createElement('textarea');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+      ta.value = ''; document.body.appendChild(ta); ta.focus();
+      try { document.execCommand('paste'); text = ta.value || ''; } catch(e2) {}
+      document.body.removeChild(ta);
+      if (text && text.trim()) processClipText(text);
+    }, 800);
+    return;
+  }
+  await processClipText(text);
+}
+
+/* 处理剪贴板文本：解析 → 短链展开 → 跳转/展示 */
+async function processClipText(text) {
+  if (!text || !text.trim()) { showClipRow('clipRowIdle'); return; }
   const info = parseClipText(text);
   if (!info.name) { showClipRow('clipRowIdle'); return; }
-
-  // 短链（dpurl.cn 等）不含 poi_id_str → 前端展开跟随跳转拿真实 URL
-  if (info.url && !info.poi && isShortLink(info.url)) {
-    document.querySelector('#clipRowLoading .clip-msg').textContent = '展开短链中…';
-    showClipRow('clipRowLoading');
-    const expanded = await expandShortLink(info.url);
-    if (expanded) {
-      const p = extractPoi(expanded);
-      if (p) { info.poi = p; info.url = expanded; }
-    }
-  }
-
   clipInfo = info;
 
-  // 有 POI → 展示店名 + 自动倒计时跳转
+  // 有 POI → 直接跳转
   if (info.poi) {
     const it = autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
     document.getElementById('clipShopName').textContent = info.name;
     showClipRow('clipRowJump');
-    // 1.5s 后自动跳转 v8 主券
-    let countdown = 2;
-    const tick = () => {
-      if (!clipJumpTimer) return; // 已被取消
-      if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(info.poi, 'v8'); return; }
-      const el = document.getElementById('clipJumpMsg');
-      if (el) el.innerHTML = '已识别，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
-      countdown--; clipJumpTimer = setTimeout(tick, 1000);
-      // 重新绑定取消事件（因为 innerHTML 被替换了）
-      const c = document.getElementById('clipCancelJump');
-      if (c) c.addEventListener('click', () => cancelAutoJump());
-    };
-    clipJumpTimer = setTimeout(tick, 500);
+    startAutoJump(info.poi);
     render();
     return;
   }
 
-  // 有链接但无 POI → 展示详情
+  // 无 POI 但有链接 → 尝试展开短链（5s 超时）
   if (info.url) {
+    document.querySelector('#clipRowLoading .clip-msg').textContent = '展开短链中…';
+    showClipRow('clipRowLoading');
+
+    const timer = new Promise(resolve => setTimeout(() => resolve(null), 5000));
+    const result = await Promise.race([expandShortLink(info.url), timer]);
+    if (result) {
+      const p = extractPoi(result);
+      if (p) { info.poi = p; info.url = result; clipInfo = info; }
+    }
+
+    if (info.poi) {
+      autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
+      document.getElementById('clipShopName').textContent = info.name;
+      showClipRow('clipRowJump');
+      startAutoJump(info.poi);
+      render();
+      return;
+    }
+
     const shortUrl = info.url.length > 55 ? info.url.slice(0, 52) + '…' : info.url;
     const isShort = isShortLink(info.url);
     const el = document.getElementById('clipRowNoPoi');
     if (el) el.querySelector('.clip-msg').innerHTML =
-      (isShort ? '短链展开失败' : '链接未含 poi_id_str') +
+      (isShort ? '短链无法展开' : '链接未含 poi_id_str') +
       (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
       '<br><small style="opacity:.6;word-break:break-all">' + esc(shortUrl) + '</small>' +
-      (lastExpandDebug ? '<br><small style="opacity:.45;word-break:break-all;font-size:10px">调试: ' + esc(lastExpandDebug) + '</small>' : '') +
-      ' <a class="clip-retry" id="clipRetry2">重试</a>' +
-      ' <a class="clip-manual" id="clipManual">手动粘贴完整链接</a>';
+      ' <a class="clip-retry" id="clipRetry2">重试</a> <a class="clip-manual" id="clipManual">手动粘贴</a>';
     showClipRow('clipRowNoPoi');
     return;
   }
-  // 只有文本无链接：展示空闲状态
+
   showClipRow('clipRowIdle');
+}
+
+/* 启动倒计时自动跳转 */
+function startAutoJump(poi) {
+  let countdown = 2;
+  const tick = () => {
+    if (!clipJumpTimer) return;
+    if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(poi, 'v8'); return; }
+    const el = document.getElementById('clipJumpMsg');
+    if (el) el.innerHTML = '已识别，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
+    countdown--; clipJumpTimer = setTimeout(tick, 1000);
+    const c = document.getElementById('clipCancelJump');
+    if (c) c.addEventListener('click', () => cancelAutoJump());
+  };
+  clipJumpTimer = setTimeout(tick, 500);
 }
 
 /* 取消自动跳转 */
@@ -1284,9 +1314,10 @@ function cancelAutoJump() {
   const c = document.getElementById('clipCancelJump'); if (c) c.style.display = 'none';
 }
 
-/* 按钮事件：使用事件代理（clipRetry/clipRetry2/clipManual 的 DOM 会被动态替换） */
+/* 按钮事件：使用事件代理（DOM 会被动态替换，统一挂载在 #clipArea） */
 $('#clipArea').addEventListener('click', async e => {
-  if (e.target.closest('#clipRetry') || e.target.closest('#clipRetry2')) {
+  // 点击空闲行 → 触发读剪贴板（iOS 需要用户手势）
+  if (e.target.closest('#clipRowIdle') || e.target.closest('#clipRetry') || e.target.closest('#clipRetry2')) {
     initClipBoard();
     return;
   }

@@ -252,6 +252,9 @@ body {
 }
 .clip-area.poi-found { border-color: rgba(76,175,80,.5); }
 .clip-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; min-height: 44px; }
+.clip-tap { cursor: pointer; transition: background .2s; }
+.clip-tap:active { background: var(--glass-strong); border-radius: 10px; }
+.clip-tap .clip-msg { color: var(--text); font-weight: 600; }
 .clip-row .clip-spin {
   width: 14px; height: 14px; flex: none;
   border: 2px solid var(--glass-border); border-top-color: var(--muted);
