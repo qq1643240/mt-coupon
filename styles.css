@@ -240,25 +240,79 @@ body {
 }
 [data-theme="dark"] .note-pill { background: rgba(0,140,255,.15); color: #5ab0ff; border-color: rgba(0,140,255,.3); }
 
-/* 一键读剪贴板直跳 App（v8 / v6 同一行两个按钮） */
-.quickjump { display: flex; flex-direction: row; gap: 9px; margin: 12px 0 2px; }
-.qj-main {
+/* 自动读剪贴板 → App 跳转（玻璃卡片） */
+.clip-area {
+  margin: 12px 0 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  overflow: hidden;
+  transition: all .3s;
+}
+.clip-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+.clip-row.idle { color: var(--muted); }
+.clip-row.error { color: var(--muted); }
+.clip-row.loading { color: var(--muted); }
+.clip-row.ready { flex-direction: column; align-items: stretch; gap: 11px; padding: 13px 14px; }
+.clip-icon-wrap { flex: none; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.clip-icon-i { display: block; width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--muted); opacity: .5; }
+.clip-msg { font-size: 12.5px; line-height: 1.5; }
+.clip-spin {
+  width: 14px; height: 14px; flex: none;
+  border: 2px solid var(--glass-border); border-top-color: var(--muted);
+  border-radius: 50%; animation: spin .7s linear infinite;
+}
+.clip-retry {
+  color: var(--text); font-weight: 700; cursor: pointer; text-decoration: underline;
+  margin-left: 4px;
+}
+
+/* 剪贴板识别 → 店名 + 跳转按钮 */
+.clip-shop-name {
+  font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.4;
+  padding: 0 2px; word-break: break-word;
+}
+.clip-btns {
+  display: flex; gap: 9px;
+}
+.clip-poi-btns {
+  display: flex; gap: 9px;
+}
+.clip-jump-btn {
   flex: 1; min-width: 0;
-  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   border: none; cursor: pointer;
-  padding: 13px 10px; border-radius: 15px;
-  font-size: 13.5px; font-weight: 700; color: #1c1c1e; white-space: nowrap;
-  background: linear-gradient(135deg, #FFE08A, #FFC93C);
-  box-shadow: 0 6px 18px rgba(255,201,60,.4), inset 0 1px 0 rgba(255,255,255,.5);
-  transition: transform .12s, box-shadow .2s, filter .2s;
+  padding: 11px 8px; border-radius: 13px;
+  font-size: 13px; font-weight: 700; white-space: nowrap;
+  transition: transform .12s, filter .2s;
 }
-.qj-main.qj-v6 {
-  background: linear-gradient(135deg, #FFD3A5, #FF9F55);
-  box-shadow: 0 6px 18px rgba(255,159,85,.4), inset 0 1px 0 rgba(255,255,255,.5);
+.clip-jump-btn:active { transform: scale(.96); filter: brightness(.97); }
+
+/* 美团外卖搜索（黄色渐变） */
+.jp-waimai {
+  color: #5a3e00;
+  background: linear-gradient(135deg, #FFE18A, #FFBB2E);
+  box-shadow: 0 4px 14px rgba(255,180,50,.35), inset 0 1px 0 rgba(255,255,255,.45);
 }
-.qj-main:active { transform: scale(.97); filter: brightness(.97); }
-.qj-main .bi { display: inline-flex; }
-.qj-main .bi .ic { width: 18px; height: 18px; color: #1c1c1e; }
+/* 美团搜索（橙色渐变） */
+.jp-mt {
+  color: #fff;
+  background: linear-gradient(135deg, #FF8C42, #FF5C00);
+  box-shadow: 0 4px 14px rgba(255,92,0,.35), inset 0 1px 0 rgba(255,255,255,.3);
+}
+/* v8 领券（绿色） */
+.jp-v8 {
+  color: #fff;
+  background: linear-gradient(135deg, #4CAF50, #2E7D32);
+  box-shadow: 0 4px 14px rgba(46,125,50,.35), inset 0 1px 0 rgba(255,255,255,.25);
+}
+/* v6 领券（蓝色） */
+.jp-v6 {
+  color: #fff;
+  background: linear-gradient(135deg, #42A5F5, #1565C0);
+  box-shadow: 0 4px 14px rgba(21,101,192,.35), inset 0 1px 0 rgba(255,255,255,.25);
+}
 
 /* ---------- 统计条 / 说明 ---------- */
 .statbar {

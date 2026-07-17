@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.48'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.49'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -155,8 +155,6 @@ function injectIcons() {
   set('addBtn', ICON.plus);
   set('searchClear', ICON.close);
   set('claimIc', ICON.ticket);
-  set('qjIcV8', ICON.bolt);
-  set('qjIcV6', ICON.bolt);
 }
 function extractPoi(url) {
   const m = String(url || '').match(/poi_id_str=([^&\s"'<>\\]+)/);
@@ -648,9 +646,9 @@ function moveSegInd() {
   $('#segInd').style.transform = `translateX(${i * 100}%)`;
 }
 function applyPageChrome() {
-  // 「读剪贴板直跳 / v8·v6」控件只在津贴（商家）页有意义，领券/定位页隐藏
-  const qj = document.getElementById('quickjump');
-  if (qj) qj.classList.toggle('hidden', curPage !== 'shop');
+  // 剪贴板识别区域只在津贴（商家）页有意义，领券/定位页隐藏
+  const ca = document.getElementById('clipArea');
+  if (ca) ca.classList.toggle('hidden', curPage !== 'shop');
 }
 segBtns.forEach((b, i) => b.addEventListener('click', async () => {
   segBtns.forEach(x => x.classList.remove('active'));
@@ -1055,21 +1053,22 @@ function handleDeepLink() {
   }
 }
 
-/* ---------- 一键读剪贴板直跳 imeituan:// 美团 App 领券 ---------- */
-let qjVer = 'v8';
+/* ---------- 自动读剪贴板 → App 搜索 / 领券 ---------- */
+let clipInfo = { name: '', poi: null, url: '' };
+
 function imeituanDeepLink(poi, ver) {
-  const activityUrl = buildUrl(poi, ver); // offsiteact.meituan.com H5 领券页
+  const activityUrl = buildUrl(poi, ver);
   return 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
 }
-/* 读取剪贴板文本：安全上下文（HTTPS/localhost）优先用 Clipboard API；
-   非安全上下文（如 http://IP:端口 的宝塔部署）Clipboard API 不可用，降级为站内粘贴弹窗 */
+
+/* 读取剪贴板文本：安全上下文优先，非安全降级为站内粘贴弹窗 */
 function manualPasteClipboard() {
   return new Promise(resolve => {
     const modal = document.getElementById('clipModal');
     const ta = document.getElementById('clipInput');
     const okBtn = document.getElementById('clipOk');
     const cancelBtn = document.getElementById('clipCancel');
-    if (!modal || !ta || !okBtn) { resolve(''); return; } // 兜底：无弹窗元素则不阻塞
+    if (!modal || !ta || !okBtn) { resolve(''); return; }
     ta.value = '';
     modal.classList.remove('hidden');
     ta.focus();
@@ -1092,14 +1091,102 @@ async function getClipboardText() {
   if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
     try { const t = await navigator.clipboard.readText(); if (t && t.trim()) return t; } catch (e) {}
   }
-  // 宝塔 HTTP 等不安全环境：Clipboard API 不可用 → 站内粘贴弹窗（Ctrl+V 即可），功能等效
   toast('当前为 http 站点，浏览器禁止自动读剪贴板，请手动粘贴');
   return await manualPasteClipboard();
 }
 
+/* 解析剪贴板：提取店名 + 可选 POI */
+function parseClipText(text) {
+  if (!text || !text.trim()) return { name: '', poi: null, url: '' };
+  const s = text.trim();
+  const url = extractUrl(s) || '';
+  const poi = url ? extractPoi(url) : null;
+  const name = url ? (extractName(s) || (poi ? '美团店铺' : '')) : s.substring(0, 50);
+  return { name, poi, url };
+}
+
+/* 切换剪贴板区域行 */
+function showClipRow(id) {
+  ['clipRowIdle', 'clipRowReady', 'clipRowError', 'clipRowLoading'].forEach(r => {
+    const el = document.getElementById(r); if (el) el.classList.add('hidden');
+  });
+  const el = document.getElementById(id); if (el) el.classList.remove('hidden');
+}
+
+/* 跳转 App 搜索（美团外卖 / 美团） */
+function jumpAppSearch(app, query) {
+  const q = encodeURIComponent(query.substring(0, 80));
+  if (app === 'waimai') {
+    location.href = 'meituanwaimai://waimai.meituan.com/search?query=' + q;
+  } else {
+    location.href = 'imeituan://www.meituan.com/search?q=' + q;
+  }
+  // 兜底：1.5s 后若没唤起 App，打开 H5 搜索页
+  setTimeout(() => {
+    const h5 = app === 'waimai'
+      ? 'https://waimai.meituan.com/search?query=' + q
+      : 'https://www.meituan.com/s/' + q;
+    window.open(h5, '_blank');
+  }, 1500);
+}
+
+/* 页面加载 → 自动读剪贴板 → 展示跳转按钮 */
+async function initClipBoard() {
+  if (curPage !== 'shop') return;
+  showClipRow('clipRowLoading');
+  let text = '';
+  try {
+    if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
+      text = await navigator.clipboard.readText();
+    }
+  } catch (e) {}
+  if (!text || !text.trim()) {
+    // 非安全上下文 → 不自动弹窗，只提示可点击
+    if (!window.isSecureContext) showClipRow('clipRowIdle');
+    else showClipRow('clipRowError');
+    return;
+  }
+  const info = parseClipText(text);
+  if (!info.name) { showClipRow('clipRowError'); return; }
+  clipInfo = info;
+  document.getElementById('clipShopName').textContent = info.name;
+  // poi 直领按钮：只对含 poi_id_str 的链接展示（无后端 /resolve 也能工作）
+  document.getElementById('clipPoiBtns').classList.toggle('hidden', !info.poi);
+  showClipRow('clipRowReady');
+  // 有 POI → 自动添加到本地收藏
+  if (info.poi) { autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save(); }
+}
+
+/* 按钮事件 */
+$('#clipWaimai').addEventListener('click', () => {
+  if (!clipInfo.name) return;
+  jumpAppSearch('waimai', clipInfo.name);
+});
+
+$('#clipMt').addEventListener('click', () => {
+  if (!clipInfo.name) return;
+  jumpAppSearch('meituan', clipInfo.name);
+});
+
+$('#clipV8').addEventListener('click', () => {
+  if (!clipInfo.poi) return;
+  const it = data.find(d => d.poi === clipInfo.poi);
+  if (it) { it.claimed = true; it.updatedAt = Date.now(); bumpStat(1); save(); render(); }
+  location.href = imeituanDeepLink(clipInfo.poi, 'v8');
+});
+
+$('#clipV6').addEventListener('click', () => {
+  if (!clipInfo.poi) return;
+  const it = data.find(d => d.poi === clipInfo.poi);
+  if (it) { it.claimed = true; it.updatedAt = Date.now(); bumpStat(2); save(); render(); }
+  location.href = imeituanDeepLink(clipInfo.poi, 'v6');
+});
+
+$('#clipRetry').addEventListener('click', () => initClipBoard());
+
+/* 兼容旧 ?jkclip 深链（通过后端 /resolve 解析 poi 后直跳，保留原逻辑） */
 async function quickJumpFromClipboard(ver) {
-  ver = (ver === 'v6') ? 'v6' : (ver === 'v8' ? 'v8' : qjVer); // 允许指定版本；缺省用全局（供 ?jkclip 深链复用）
-  qjVer = ver;
+  ver = (ver === 'v6') ? 'v6' : 'v8';
   const text = await getClipboardText();
   if (!text || !text.trim()) { toast('未获取到链接，请先复制美团分享链接'); return; }
   const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
@@ -1109,13 +1196,12 @@ async function quickJumpFromClipboard(ver) {
     const r = await fetch('/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' });
     const info = await r.json().catch(() => ({}));
     if (info && info.poi) {
-      // 领券同时自动保存商家信息到下方卡片（含店名/头像），便于以后一键复领
       const name = (info.name && isValidShopName(info.name)) ? info.name : extractName(text);
       const it = autoSave(info.poi, { name, logo: info.logo || null });
       it.claimed = true; it.updatedAt = Date.now();
       bumpStat(ver === 'v6' ? 2 : 1);
       save(); render();
-      location.href = imeituanDeepLink(info.poi, ver); // 直接唤起美团 App（iOS 弹确认框）
+      location.href = imeituanDeepLink(info.poi, ver);
       toast('已收藏并唤起美团 App（' + ver + '）');
     } else if (info && info.poiNum) {
       toast('该链接只含数字店铺ID，无 poi_id_str，无法直跳');
@@ -1124,13 +1210,12 @@ async function quickJumpFromClipboard(ver) {
     }
   } catch (e) { toast('解析请求失败'); }
 }
-$('#qjClipV8').addEventListener('click', () => quickJumpFromClipboard('v8'));
-$('#qjClipV6').addEventListener('click', () => quickJumpFromClipboard('v6'));
 
 injectIcons();
 const _fv = document.getElementById('footVer'); if (_fv) _fv.textContent = 'v' + VERSION;
 render();
 handleDeepLink();
+initClipBoard();
 
 /* 版本更新提示：配合 index.html 的 app.js?v= 指纹，解决「部署了但用户看到旧版」 */
 (function checkVersionUpdate() {

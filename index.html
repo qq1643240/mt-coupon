@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#e9ebef" />
   <meta name="robots" content="noindex, nofollow, noarchive" />
   <title>领券助手</title>
-  <link rel="stylesheet" href="styles.css?v=1.48" />
+  <link rel="stylesheet" href="styles.css?v=1.49" />
 </head>
 <body>
   <!-- 背景液态光晕（让毛玻璃透出层次） -->
@@ -50,16 +50,35 @@
       <!-- 标签筛选栏 -->
       <div class="tag-bar hidden" id="tagBar"></div>
 
-      <!-- 一键读剪贴板直跳美团 App 领券（v8 / v6 各一个按钮，同一行） -->
-      <div class="quickjump" id="quickjump">
-        <button class="qj-main" id="qjClipV8" data-ver="v8" type="button">
-          <span class="bi" id="qjIcV8"></span>
-          <span class="qj-txt">读剪贴板 · v8 跳 App</span>
-        </button>
-        <button class="qj-main qj-v6" id="qjClipV6" data-ver="v6" type="button">
-          <span class="bi" id="qjIcV6"></span>
-          <span class="qj-txt">读剪贴板 · v6 跳 App</span>
-        </button>
+      <!-- 自动读剪贴板 → App 跳转 -->
+      <div class="clip-area" id="clipArea">
+        <!-- 空闲：等待用户复制 -->
+        <div class="clip-row idle" id="clipRowIdle">
+          <span class="clip-icon-wrap"><span class="clip-icon-i"></span></span>
+          <span class="clip-msg">复制美团店铺名或链接，打开本页自动跳 App</span>
+        </div>
+        <!-- 已识别：展示店名 + 跳转按钮 -->
+        <div class="clip-row hidden ready" id="clipRowReady">
+          <div class="clip-shop-name" id="clipShopName"></div>
+          <div class="clip-btns">
+            <button class="clip-jump-btn jp-waimai" id="clipWaimai" type="button">美团外卖 APP</button>
+            <button class="clip-jump-btn jp-mt" id="clipMt" type="button">美团 APP</button>
+          </div>
+          <!-- 如果剪贴板链接里有 poi_id_str，额外展示领券直跳 -->
+          <div class="clip-poi-btns hidden" id="clipPoiBtns">
+            <button class="clip-jump-btn jp-v8" id="clipV8" type="button">v8 领券</button>
+            <button class="clip-jump-btn jp-v6" id="clipV6" type="button">v6 领券</button>
+          </div>
+        </div>
+        <!-- 失败/空 -->
+        <div class="clip-row hidden error" id="clipRowError">
+          <span class="clip-msg">未读取到剪贴板<a class="clip-retry" id="clipRetry">重试</a></span>
+        </div>
+        <!-- 正在读取 -->
+        <div class="clip-row hidden loading" id="clipRowLoading">
+          <span class="clip-spin"></span>
+          <span class="clip-msg">读取剪贴板…</span>
+        </div>
       </div>
     </header>
 
@@ -78,7 +97,7 @@
       <p>③ 点「领取」自动标记已领取并打开领取通道（v8 / v6 可切号）。</p>
       <p>④ 数据保存在本机浏览器，作者 <b>@6866</b>。</p>
       <p>⑤ iOS 快捷指令：复制美团分享链接后，用「打开 URL」跳转 <b>?url=链接</b> 自动识别详情；或 <b>?claim=商家poi</b> 直接跳美团领取。</p>
-      <p>⑥ 点「读剪贴板 · v8/v6 跳 App」：自动读取美团分享链接 → 解析 → 唤起 App，<b>同时把该商家保存到下方卡片并标记已领</b>。HTTPS 站点自动读剪贴板；<b>宝塔 http://IP 站点会弹窗让你粘贴</b>（功能等效）。v8 主券、v6 第二张各一个按钮。</p>
+      <p>⑥ 打开本页<b>自动读取剪贴板</b>：提取店铺名后展示两个大按钮—<b>美团外卖 APP</b> / <b>美团 APP</b>—点按钮直达 App 搜索；若剪贴板链接含 poi_id_str 还会多出 <b>v8/v6 领券直跳</b>。HTTP 站点会弹粘贴框。</p>
       <p>⑦ 领券页：点卡片跳转领取（<b>#小程序链接自动唤起微信 App</b>），点下方地址小横条自动复制领取/微领券地址。</p>
     </div>
 
@@ -91,7 +110,7 @@
 
     <footer class="foot">
       <span class="author">@6866</span><span class="foot-sep">·</span>
-      <span id="footVer">v1.48</span>
+      <span id="footVer">v1.49</span>
     </footer>
 
     <button id="addBtn" class="fab" title="新增" aria-label="新增"></button>
@@ -153,6 +172,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.48"></script>
+  <script src="app.js?v=1.49"></script>
 </body>
 </html>
