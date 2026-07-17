@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.52'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.53'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -1146,36 +1146,41 @@ function isShortLink(url) {
     || /waimai\.meituan\.com\/(channel)?\/?$/.test(u) && !/poi_id_str=/.test(u);
 }
 
-/* 前端展开短链：用 CORS 代理跟随 302 拿真实 URL
-   代理失败则直接 fetch（部分短链允许读到 response.url） */
+/* 前端展开短链：国内可直连短链还原 API 优先，国外代理兜底
+   每个 API 返回 JSON，含 CORS，提取真实 URL */
 async function expandShortLink(shortUrl) {
-  const candidates = [
-    'https://api.allorigins.win/get?url=',
-    'https://corsproxy.io/?url='
+  const apis = [
+    { base: 'https://api.uomg.com/api/shorturl_restore?url=', pick: j => j.data || j.url },
+    { base: 'https://api.vvhan.com/api/dpurl?url=',          pick: j => j.data || j.url || (j.result && (j.result.url || j.result)) },
+    { base: 'https://tenapi.cn/v2/shorturl?url=',            pick: j => j.data || (j.result && (j.result.url || j.result)) },
+    { base: 'https://60s.viki.moe/api/dpurl?url=',           pick: j => j.data || j.url || (j.result && j.result.url) }
   ];
-  for (const base of candidates) {
+  for (const api of apis) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(api.base + encodeURIComponent(shortUrl), { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(t);
+      const j = await r.json().catch(() => null);
+      if (!j) continue;
+      const final = api.pick(j);
+      if (typeof final === 'string' && /^https?:\/\//.test(final)) return final;
+    } catch (e) { /* 试下一个 API */ }
+  }
+  // 兜底：国外代理（用户开代理时可用）
+  for (const base of ['https://api.allorigins.win/get?url=', 'https://corsproxy.io/?url=']) {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 6000);
       const r = await fetch(base + encodeURIComponent(shortUrl), { signal: ctrl.signal, cache: 'no-store' });
       clearTimeout(t);
-      // allorigins 返回 {status:{url,redirectURL}, contents}
       if (base.includes('allorigins')) {
         const j = await r.json().catch(() => null);
         const final = (j && j.status && (j.status.redirectURL || j.status.url)) || null;
         if (final) return final;
-      } else {
-        // corsproxy 直接返回目标页 HTML；从响应 URL 拿最终地址
-        const final = r.url && r.url !== base ? r.url : null;
-        if (final && final !== shortUrl) return final;
-      }
-    } catch (e) { /* 试下一个代理 */ }
+      } else if (r.url && r.url !== base) return r.url;
+    } catch (e) {}
   }
-  // 兜底：直接 fetch 跟随跳转（部分短链 response.url 可被读取）
-  try {
-    const r = await fetch(shortUrl.replace(/^http:/, 'https:'), { method: 'GET', redirect: 'follow', mode: 'no-cors' });
-    if (r.url && r.url !== shortUrl) return r.url;
-  } catch (e) {}
   return null;
 }
 
@@ -1246,7 +1251,8 @@ async function initClipBoard() {
       (isShort ? '短链展开失败，请复制完整链接' : '链接未含 poi_id_str') +
       (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
       '<br><small style="opacity:.6;word-break:break-all">' + esc(shortUrl) + '</small>' +
-      ' <a class="clip-retry" id="clipRetry2">重试</a>';
+      ' <a class="clip-retry" id="clipRetry2">重试</a>' +
+      ' <a class="clip-manual" id="clipManual">手动粘贴完整链接</a>';
     showClipRow('clipRowNoPoi');
     return;
   }
@@ -1262,11 +1268,38 @@ function cancelAutoJump() {
   const c = document.getElementById('clipCancelJump'); if (c) c.style.display = 'none';
 }
 
-/* 按钮事件：使用事件代理（clipRetry/clipRetry2 的 DOM 会被动态替换） */
-$('#clipArea').addEventListener('click', e => {
+/* 按钮事件：使用事件代理（clipRetry/clipRetry2/clipManual 的 DOM 会被动态替换） */
+$('#clipArea').addEventListener('click', async e => {
   if (e.target.closest('#clipRetry') || e.target.closest('#clipRetry2')) {
     initClipBoard();
     return;
+  }
+  if (e.target.closest('#clipManual')) {
+    const pasted = await manualPasteClipboard();
+    if (pasted && pasted.trim()) {
+      const re = parseClipText(pasted);
+      if (re.poi) {
+        // 直接走跳转流程
+        clipInfo = re;
+        const it = autoSave(re.poi, { name: re.name || '该店铺', logo: null }); save();
+        document.getElementById('clipShopName').textContent = re.name;
+        showClipRow('clipRowJump');
+        let countdown = 2;
+        const tick = () => {
+          if (!clipJumpTimer) return;
+          if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(re.poi, 'v8'); return; }
+          const el = document.getElementById('clipJumpMsg');
+          if (el) el.innerHTML = '已识别，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
+          countdown--; clipJumpTimer = setTimeout(tick, 1000);
+          const c = document.getElementById('clipCancelJump');
+          if (c) c.addEventListener('click', () => cancelAutoJump());
+        };
+        clipJumpTimer = setTimeout(tick, 500);
+        render();
+      } else {
+        toast('粘贴的链接仍未含 poi_id_str');
+      }
+    }
   }
 });
 
