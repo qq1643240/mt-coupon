@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.49'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.50'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -1053,12 +1053,23 @@ function handleDeepLink() {
   }
 }
 
-/* ---------- 自动读剪贴板 → App 搜索 / 领券 ---------- */
+/* ---------- 自动读剪贴板 → 津贴领取 ---------- */
 let clipInfo = { name: '', poi: null, url: '' };
+let clipJumpTimer = null;
 
 function imeituanDeepLink(poi, ver) {
-  const activityUrl = buildUrl(poi, ver);
+  const activityUrl = buildUrl(poi, ver); // offsiteact.meituan.com 津贴 H5
   return 'imeituan://www.meituan.com/web?url=' + encodeURIComponent(activityUrl);
+}
+
+/* 执行跳转：标记已领 + 统计 + 唤起 App */
+function doJumpClaim(poi, ver) {
+  const it = data.find(d => d.poi === poi);
+  if (it) { it.claimed = true; it.updatedAt = Date.now(); }
+  bumpStat(ver === 'v6' ? 2 : 1);
+  save();
+  location.href = imeituanDeepLink(poi, ver);
+  if (it) toast('已跳转：' + it.name);
 }
 
 /* 读取剪贴板文本：安全上下文优先，非安全降级为站内粘贴弹窗 */
@@ -1069,14 +1080,11 @@ function manualPasteClipboard() {
     const okBtn = document.getElementById('clipOk');
     const cancelBtn = document.getElementById('clipCancel');
     if (!modal || !ta || !okBtn) { resolve(''); return; }
-    ta.value = '';
-    modal.classList.remove('hidden');
-    ta.focus();
+    ta.value = ''; modal.classList.remove('hidden'); ta.focus();
     const finish = val => {
       modal.classList.add('hidden');
       okBtn.removeEventListener('click', onOk);
-      cancelBtn.removeEventListener('click', onCancel);
-      ta.onkeydown = null;
+      cancelBtn.removeEventListener('click', onCancel); ta.onkeydown = null;
       resolve((val || '').trim());
     };
     const onOk = () => finish(ta.value);
@@ -1091,11 +1099,11 @@ async function getClipboardText() {
   if (navigator.clipboard && navigator.clipboard.readText && window.isSecureContext) {
     try { const t = await navigator.clipboard.readText(); if (t && t.trim()) return t; } catch (e) {}
   }
-  toast('当前为 http 站点，浏览器禁止自动读剪贴板，请手动粘贴');
+  toast('浏览器禁止自动读剪贴板，请手动粘贴');
   return await manualPasteClipboard();
 }
 
-/* 解析剪贴板：提取店名 + 可选 POI */
+/* 解析剪贴板：提取店名 + POI + URL */
 function parseClipText(text) {
   if (!text || !text.trim()) return { name: '', poi: null, url: '' };
   const s = text.trim();
@@ -1105,32 +1113,15 @@ function parseClipText(text) {
   return { name, poi, url };
 }
 
-/* 切换剪贴板区域行 */
+/* 切换剪贴板区域显示 */
 function showClipRow(id) {
-  ['clipRowIdle', 'clipRowReady', 'clipRowError', 'clipRowLoading'].forEach(r => {
+  ['clipRowIdle', 'clipRowJump', 'clipRowNoPoi', 'clipRowLoading'].forEach(r => {
     const el = document.getElementById(r); if (el) el.classList.add('hidden');
   });
   const el = document.getElementById(id); if (el) el.classList.remove('hidden');
 }
 
-/* 跳转 App 搜索（美团外卖 / 美团） */
-function jumpAppSearch(app, query) {
-  const q = encodeURIComponent(query.substring(0, 80));
-  if (app === 'waimai') {
-    location.href = 'meituanwaimai://waimai.meituan.com/search?query=' + q;
-  } else {
-    location.href = 'imeituan://www.meituan.com/search?q=' + q;
-  }
-  // 兜底：1.5s 后若没唤起 App，打开 H5 搜索页
-  setTimeout(() => {
-    const h5 = app === 'waimai'
-      ? 'https://waimai.meituan.com/search?query=' + q
-      : 'https://www.meituan.com/s/' + q;
-    window.open(h5, '_blank');
-  }, 1500);
-}
-
-/* 页面加载 → 自动读剪贴板 → 展示跳转按钮 */
+/* 页面加载 → 自动读剪贴板 → 有 POI 则自动跳津贴 */
 async function initClipBoard() {
   if (curPage !== 'shop') return;
   showClipRow('clipRowLoading');
@@ -1140,51 +1131,65 @@ async function initClipBoard() {
       text = await navigator.clipboard.readText();
     }
   } catch (e) {}
-  if (!text || !text.trim()) {
-    // 非安全上下文 → 不自动弹窗，只提示可点击
-    if (!window.isSecureContext) showClipRow('clipRowIdle');
-    else showClipRow('clipRowError');
+  if (!text || !text.trim()) { showClipRow('clipRowIdle'); return; }
+
+  const info = parseClipText(text);
+  if (!info.name) { showClipRow('clipRowIdle'); return; }
+  clipInfo = info;
+
+  // 有 POI → 展示店名 + 自动倒计时跳转
+  if (info.poi) {
+    const it = autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
+    document.getElementById('clipShopName').textContent = info.name;
+    showClipRow('clipRowJump');
+    // 1.5s 后自动跳转 v8 主券
+    let countdown = 2;
+    const tick = () => {
+      if (!clipJumpTimer) return; // 已被取消
+      if (countdown <= 0) { clipJumpTimer = null; doJumpClaim(info.poi, 'v8'); return; }
+      const el = document.getElementById('clipJumpMsg');
+      if (el) el.innerHTML = '已识别，' + countdown + 's 后自动跳津贴… <a class="clip-cancel" id="clipCancelJump">取消</a>';
+      countdown--; clipJumpTimer = setTimeout(tick, 1000);
+      // 重新绑定取消事件（因为 innerHTML 被替换了）
+      const c = document.getElementById('clipCancelJump');
+      if (c) c.addEventListener('click', () => cancelAutoJump());
+    };
+    clipJumpTimer = setTimeout(tick, 500);
+    render();
     return;
   }
-  const info = parseClipText(text);
-  if (!info.name) { showClipRow('clipRowError'); return; }
-  clipInfo = info;
-  document.getElementById('clipShopName').textContent = info.name;
-  // poi 直领按钮：只对含 poi_id_str 的链接展示（无后端 /resolve 也能工作）
-  document.getElementById('clipPoiBtns').classList.toggle('hidden', !info.poi);
-  showClipRow('clipRowReady');
-  // 有 POI → 自动添加到本地收藏
-  if (info.poi) { autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save(); }
+
+  // 有链接但无 POI
+  if (info.url) { showClipRow('clipRowNoPoi'); return; }
+  // 只有文本无链接：展示空闲状态
+  showClipRow('clipRowIdle');
+}
+
+/* 取消自动跳转 */
+function cancelAutoJump() {
+  if (clipJumpTimer) { clearTimeout(clipJumpTimer); clipJumpTimer = null; }
+  document.getElementById('clipJumpMsg').textContent = '已取消自动跳转，请手动选择';
+  // 隐藏取消链接
+  const c = document.getElementById('clipCancelJump'); if (c) c.style.display = 'none';
 }
 
 /* 按钮事件 */
-$('#clipWaimai').addEventListener('click', () => {
-  if (!clipInfo.name) return;
-  jumpAppSearch('waimai', clipInfo.name);
-});
-
-$('#clipMt').addEventListener('click', () => {
-  if (!clipInfo.name) return;
-  jumpAppSearch('meituan', clipInfo.name);
-});
-
 $('#clipV8').addEventListener('click', () => {
-  if (!clipInfo.poi) return;
-  const it = data.find(d => d.poi === clipInfo.poi);
-  if (it) { it.claimed = true; it.updatedAt = Date.now(); bumpStat(1); save(); render(); }
-  location.href = imeituanDeepLink(clipInfo.poi, 'v8');
+  cancelAutoJump();
+  if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v8');
+  else toast('未识别到店铺 POI');
 });
 
 $('#clipV6').addEventListener('click', () => {
-  if (!clipInfo.poi) return;
-  const it = data.find(d => d.poi === clipInfo.poi);
-  if (it) { it.claimed = true; it.updatedAt = Date.now(); bumpStat(2); save(); render(); }
-  location.href = imeituanDeepLink(clipInfo.poi, 'v6');
+  cancelAutoJump();
+  if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v6');
+  else toast('未识别到店铺 POI');
 });
 
 $('#clipRetry').addEventListener('click', () => initClipBoard());
+$('#clipRetry2').addEventListener('click', () => initClipBoard());
 
-/* 兼容旧 ?jkclip 深链（通过后端 /resolve 解析 poi 后直跳，保留原逻辑） */
+/* 兼容旧 ?jkclip 深链（后端 /resolve，保留原逻辑） */
 async function quickJumpFromClipboard(ver) {
   ver = (ver === 'v6') ? 'v6' : 'v8';
   const text = await getClipboardText();
@@ -1199,15 +1204,12 @@ async function quickJumpFromClipboard(ver) {
       const name = (info.name && isValidShopName(info.name)) ? info.name : extractName(text);
       const it = autoSave(info.poi, { name, logo: info.logo || null });
       it.claimed = true; it.updatedAt = Date.now();
-      bumpStat(ver === 'v6' ? 2 : 1);
-      save(); render();
+      bumpStat(ver === 'v6' ? 2 : 1); save(); render();
       location.href = imeituanDeepLink(info.poi, ver);
       toast('已收藏并唤起美团 App（' + ver + '）');
     } else if (info && info.poiNum) {
       toast('该链接只含数字店铺ID，无 poi_id_str，无法直跳');
-    } else {
-      toast('解析失败，请确认是美团店铺分享链接');
-    }
+    } else { toast('解析失败，请确认是美团店铺分享链接'); }
   } catch (e) { toast('解析请求失败'); }
 }
 

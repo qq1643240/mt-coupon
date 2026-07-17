@@ -240,7 +240,7 @@ body {
 }
 [data-theme="dark"] .note-pill { background: rgba(0,140,255,.15); color: #5ab0ff; border-color: rgba(0,140,255,.3); }
 
-/* 自动读剪贴板 → App 跳转（玻璃卡片） */
+/* 自动读剪贴板 → 津贴跳转（紧凑玻璃卡片） */
 .clip-area {
   margin: 12px 0 2px;
   border-radius: var(--radius-sm);
@@ -248,67 +248,39 @@ body {
   background: var(--glass);
   -webkit-backdrop-filter: blur(10px) saturate(140%);
   backdrop-filter: blur(10px) saturate(140%);
-  overflow: hidden;
-  transition: all .3s;
+  overflow: hidden; transition: border-color .3s;
 }
-.clip-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
-.clip-row.idle { color: var(--muted); }
-.clip-row.error { color: var(--muted); }
-.clip-row.loading { color: var(--muted); }
-.clip-row.ready { flex-direction: column; align-items: stretch; gap: 11px; padding: 13px 14px; }
-.clip-icon-wrap { flex: none; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
-.clip-icon-i { display: block; width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--muted); opacity: .5; }
-.clip-msg { font-size: 12.5px; line-height: 1.5; }
-.clip-spin {
+.clip-area.poi-found { border-color: rgba(76,175,80,.5); }
+.clip-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; min-height: 44px; }
+.clip-row .clip-spin {
   width: 14px; height: 14px; flex: none;
   border: 2px solid var(--glass-border); border-top-color: var(--muted);
   border-radius: 50%; animation: spin .7s linear infinite;
 }
-.clip-retry {
-  color: var(--text); font-weight: 700; cursor: pointer; text-decoration: underline;
-  margin-left: 4px;
-}
+.clip-row .clip-msg { font-size: 12.5px; color: var(--muted); line-height: 1.5; flex: 1; }
+.clip-icon-wrap { flex: none; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; }
+.clip-icon-i { display: block; width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--muted); opacity: .45; }
+.clip-retry { color: var(--text); font-weight: 700; cursor: pointer; text-decoration: underline; margin-left: 6px; white-space: nowrap; }
 
-/* 剪贴板识别 → 店名 + 跳转按钮 */
-.clip-shop-name {
-  font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.4;
-  padding: 0 2px; word-break: break-word;
-}
-.clip-btns {
-  display: flex; gap: 9px;
-}
-.clip-poi-btns {
-  display: flex; gap: 9px;
-}
-.clip-jump-btn {
-  flex: 1; min-width: 0;
-  border: none; cursor: pointer;
-  padding: 11px 8px; border-radius: 13px;
-  font-size: 13px; font-weight: 700; white-space: nowrap;
+/* 已识别 → 即将跳转 */
+#clipRowJump { flex-direction: column; align-items: stretch; gap: 9px; padding: 12px 14px; }
+.clip-shop-name { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.4; word-break: break-word; }
+.clip-jump-hint { font-size: 12px; color: #1aa260; font-weight: 600; }
+.clip-jump-hint .clip-cancel { color: var(--muted); cursor: pointer; margin-left: 6px; font-weight: 400; text-decoration: underline; }
+.clip-btns { display: flex; gap: 9px; }
+.clip-btn-jump {
+  flex: 1; border: none; cursor: pointer;
+  padding: 11px 12px; border-radius: 12px;
+  font-size: 13px; font-weight: 700;
   transition: transform .12s, filter .2s;
 }
-.clip-jump-btn:active { transform: scale(.96); filter: brightness(.97); }
-
-/* 美团外卖搜索（黄色渐变） */
-.jp-waimai {
-  color: #5a3e00;
-  background: linear-gradient(135deg, #FFE18A, #FFBB2E);
-  box-shadow: 0 4px 14px rgba(255,180,50,.35), inset 0 1px 0 rgba(255,255,255,.45);
-}
-/* 美团搜索（橙色渐变） */
-.jp-mt {
-  color: #fff;
-  background: linear-gradient(135deg, #FF8C42, #FF5C00);
-  box-shadow: 0 4px 14px rgba(255,92,0,.35), inset 0 1px 0 rgba(255,255,255,.3);
-}
-/* v8 领券（绿色） */
-.jp-v8 {
+.clip-btn-jump:active { transform: scale(.96); filter: brightness(.95); }
+.clip-btn-jump:first-child {
   color: #fff;
   background: linear-gradient(135deg, #4CAF50, #2E7D32);
   box-shadow: 0 4px 14px rgba(46,125,50,.35), inset 0 1px 0 rgba(255,255,255,.25);
 }
-/* v6 领券（蓝色） */
-.jp-v6 {
+.clip-btn-jump:last-child {
   color: #fff;
   background: linear-gradient(135deg, #42A5F5, #1565C0);
   box-shadow: 0 4px 14px rgba(21,101,192,.35), inset 0 1px 0 rgba(255,255,255,.25);
