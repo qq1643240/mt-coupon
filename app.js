@@ -10,7 +10,13 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.59'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.60'; // 版本号：每次布局更新推送 +0.01
+
+/* API 后端基地址：
+   - Cloudflare Worker / 本地 server.js：同源 ''（接口由本域提供）
+   - GitHub Pages 等纯静态托管：GitHub 无服务端，所有 /resolve、/api/*、/sync 需转发到已部署的 Cloudflare Worker 后端 */
+const API_BASE = (location.hostname.endsWith('github.io')) ? 'https://mt.8r9d8wprth.workers.dev' : '';
+
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -371,8 +377,8 @@ function renderShop() {
 
 /* ---------- 领券页 / 分享膨胀定位页：从后端读取并展示 ---------- */
 let actsData = null, locsData = null;
-async function loadActs() { try { const r = await fetch('/api/acts', { cache: 'no-store' }); const j = await r.json(); actsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { actsData = []; } }
-async function loadLocs() { try { const r = await fetch('/api/locs', { cache: 'no-store' }); const j = await r.json(); locsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { locsData = []; } }
+async function loadActs() { try { const r = await fetch(API_BASE + '/api/acts', { cache: 'no-store' }); const j = await r.json(); actsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { actsData = []; } }
+async function loadLocs() { try { const r = await fetch(API_BASE + '/api/locs', { cache: 'no-store' }); const j = await r.json(); locsData = (j && j.ok) ? (j.data || []) : []; } catch (e) { locsData = []; } }
 
 /* 领取链接智能打开：微信小程序链接 → 微信打开；其余（美团 App / 普通链接）→ 浏览器打开 */
 function isWeixin() { return /micromessenger/i.test(navigator.userAgent); }
@@ -602,7 +608,7 @@ function openDetail(it) {
   openModal();
   // ====== 商家券实时更新：每次打开详情都查询后端最新数据 ======
   if (it.poi) {
-    fetch('/api/shop?poi=' + encodeURIComponent(it.poi), { cache: 'no-store' })
+    fetch(API_BASE + '/api/shop?poi=' + encodeURIComponent(it.poi), { cache: 'no-store' })
       .then(r => r.json().catch(() => ({})))
       .then(j => {
         if (!(j && j.ok)) return;
@@ -712,7 +718,7 @@ async function syncUpload() {
   try {
     const body = JSON.stringify(data);
     const mac = await syncMac(key, 'POST|/sync|' + body);
-    const url = '/sync?key=' + encodeURIComponent(key) + (mac ? '&mac=' + mac : '');
+    const url = API_BASE + '/sync?key=' + encodeURIComponent(key) + (mac ? '&mac=' + mac : '');
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     if (j && j.ok) toast('已上传同步（' + data.length + ' 个）');
@@ -723,7 +729,7 @@ async function syncDownload() {
   const key = getSyncKey();
   try {
     const mac = await syncMac(key, 'GET|/sync|');
-    const url = '/sync?key=' + encodeURIComponent(key) + (mac ? '&mac=' + mac : '');
+    const url = API_BASE + '/sync?key=' + encodeURIComponent(key) + (mac ? '&mac=' + mac : '');
     const r = await fetch(url, { cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
     if (j && j.ok && Array.isArray(j.data)) {
@@ -757,7 +763,7 @@ applyTheme(localStorage.getItem(THEME_KEY) || (window.matchMedia('(prefers-color
 async function resolveLink(url) {
   if (location.protocol === 'file:') return { poi: null, needLocalhost: true };
   try {
-    const r = await fetch('/resolve?url=' + encodeURIComponent(url));
+    const r = await fetch(API_BASE + '/resolve?url=' + encodeURIComponent(url));
     const j = await r.json().catch(() => ({}));
     return { poi: (j && j.poi) || null, poiNum: (j && j.poiNum) || null, finalUrl: (j && j.finalUrl) || null, logo: (j && j.logo) || null, name: (j && j.name) || null, ok: !!(j && j.ok) };
   } catch (e) { return { poi: null, error: e.message }; }
@@ -912,7 +918,7 @@ const COMMANDS = [
   { icon: ICON.open, label: '下载同步', desc: '云端拉取到本机', run: syncDownload },
   { icon: ICON.edit, label: '设置同步', desc: '跨设备共用标识', run: setSyncKey },
   { icon: ICON.trashAll, label: '清空全部', desc: '删除所有收藏', run: clearAll },
-  { icon: ICON.open, label: '后台管理', desc: '添加活动/定位', run: () => window.open('/admin', '_blank') }
+  { icon: ICON.open, label: '后台管理', desc: '添加活动/定位', run: () => window.open(API_BASE + '/admin', '_blank') }
 ];
 
 function paletteOpen(items, placeholder) {
@@ -1037,7 +1043,7 @@ function handleDeepLink() {
     const um = text.match(/https?:\/\/[^\s"'<>）)]+/);
     if (um) {
       toast('正在解析店铺…');
-      fetch('/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' })
+      fetch(API_BASE + '/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' })
         .then(r => r.json()).then(info => {
           if (info && info.poi) { window.location.href = (ver === 'v6' ? urlV6(info.poi) : urlV8(info.poi)); }
           else toast('解析失败，请确认是美团店铺分享链接');
@@ -1319,7 +1325,7 @@ async function processClipText(text) {
       // 优先服务端 /resolve（无跨域限制，可解析 dpurl.cn 等点评短链的 JS/meta 跳转）；失败再前端展开兜底
       if (!info.poi) {
         try {
-          const r = await fetch('/resolve?url=' + encodeURIComponent(info.url), { cache: 'no-store' });
+          const r = await fetch(API_BASE + '/resolve?url=' + encodeURIComponent(info.url), { cache: 'no-store' });
           const j = await r.json().catch(() => null);
           if (j && j.poi) {
             info.poi = j.poi;
@@ -1449,7 +1455,7 @@ async function quickJumpFromClipboard(ver) {
   if (!um) { toast('剪贴板里没有美团链接'); return; }
   toast('正在解析店铺…');
   try {
-    const r = await fetch('/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' });
+    const r = await fetch(API_BASE + '/resolve?url=' + encodeURIComponent(um[0]), { cache: 'no-store' });
     const info = await r.json().catch(() => ({}));
     if (info && info.poi) {
       const name = (info.name && isValidShopName(info.name)) ? info.name : extractName(text);
