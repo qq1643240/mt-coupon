@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.50'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.51'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -163,25 +163,30 @@ function extractPoi(url) {
 // 从任意文本提取第一个链接（支持「文字+链接」混排）
 function extractUrl(text) {
   const s = String(text || '');
-  const safe = /[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+/;
-  let m = s.match(new RegExp('https?://' + safe.source, 'i'));
+  // 更宽松的 URL 字符集：涵盖美团链接中所有可能的字符
+  const safeChars = /[A-Za-z0-9._~:/?#@!$&'()*+,;=%\[\]-]+/;
+  let m = s.match(new RegExp('https?://' + safeChars.source, 'i'));
   let url = m ? m[0] : null;
   if (!url) {
-    m = s.match(new RegExp('\\b(?:[a-z0-9-]+\\.)+(?:cn|com|net|me|link|url|cc|xyz)\\b' + safe.source, 'i'));
+    m = s.match(new RegExp('\\b(?:[a-z0-9-]+\\.)+(?:cn|com|net|me|link|url|cc|xyz)\\b' + safeChars.source, 'i'));
     url = m ? m[0] : null;
   }
   if (!url) return null;
-  return url.replace(/[。，、）)】」』"'.,;:!?\s]+$/, '');
+  // 清理尾部非 URL 字符（中文标点、引号等），但保留 & = 等 URL 参数
+  return url.replace(/[。，、）)\]】」』"'.,;:!?\s\u2018-\u203a\u3000-\u303f\uff00-\uffef]+$/, '');
 }
+
 // 从任意文本提取所有 http(s) 链接（用于批量识别）
 function extractAllUrls(text) {
   const s = String(text || '');
-  const safe = /[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+/;
-  const re = new RegExp('https?://' + safe.source, 'gi');
+  const safeChars = /[A-Za-z0-9._~:/?#@!$&'()*+,;=%\[\]-]+/;
+  const re = new RegExp('https?://' + safeChars.source, 'gi');
   const urls = [];
   let m;
-  while ((m = re.exec(s))) { urls.push(m[0].replace(/[。，、）)】」』"'.,;:!?\s]+$/, '')); }
-  // 去重
+  while ((m = re.exec(s))) {
+    let u = m[0].replace(/[。，、）)\]】」』"'.,;:!?\s\u2018-\u203a\u3000-\u303f\uff00-\uffef]+$/, '');
+    urls.push(u);
+  }
   return [...new Set(urls)];
 }
 // 从分享文字智能提取店名（优先 「」 【】 「」 "" 包裹；允许内含中文括号（））
@@ -1103,13 +1108,31 @@ async function getClipboardText() {
   return await manualPasteClipboard();
 }
 
-/* 解析剪贴板：提取店名 + POI + URL */
+/* 解析剪贴板：多策略提取店名 + POI + URL */
 function parseClipText(text) {
   if (!text || !text.trim()) return { name: '', poi: null, url: '' };
   const s = text.trim();
-  const url = extractUrl(s) || '';
-  const poi = url ? extractPoi(url) : null;
-  const name = url ? (extractName(s) || (poi ? '美团店铺' : '')) : s.substring(0, 50);
+  let poi = null, url = '', name = '';
+
+  // 策略1：通过 extractAllUrls 找所有链接，逐个提取 POI
+  const allUrls = extractAllUrls(s);
+  for (const u of allUrls) {
+    const p = extractPoi(u);
+    if (p) { poi = p; url = u; break; }
+  }
+
+  // 策略2：如果所有链接都没找到 POI，直接在原始文本中匹配 poi_id_str
+  if (!poi) {
+    const rawM = s.match(/poi_id_str=([^&\s"'<>\\\u4e00-\u9fff]+)/);
+    if (rawM) { poi = decodeURIComponent(rawM[1]); url = extractUrl(s) || ''; }
+  }
+
+  // 策略3：extractUrl 兜底（可能捕获到 extractAllUrls 漏掉的 URL）
+  if (!url) url = extractUrl(s) || '';
+
+  // 提取店名
+  name = url ? (extractName(s) || (poi ? '美团店铺' : '')) : s.substring(0, 50);
+
   return { name, poi, url };
 }
 
@@ -1159,8 +1182,17 @@ async function initClipBoard() {
     return;
   }
 
-  // 有链接但无 POI
-  if (info.url) { showClipRow('clipRowNoPoi'); return; }
+  // 有链接但无 POI → 展示详情
+  if (info.url) {
+    const shortUrl = info.url.length > 55 ? info.url.slice(0, 52) + '…' : info.url;
+    const el = document.getElementById('clipRowNoPoi');
+    if (el) el.querySelector('.clip-msg').innerHTML =
+      '链接未含 poi_id_str' + (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
+      '<br><small style="opacity:.6;word-break:break-all">' + esc(shortUrl) + '</small>' +
+      ' <a class="clip-retry" id="clipRetry2">重试</a>';
+    showClipRow('clipRowNoPoi');
+    return;
+  }
   // 只有文本无链接：展示空闲状态
   showClipRow('clipRowIdle');
 }
@@ -1173,7 +1205,14 @@ function cancelAutoJump() {
   const c = document.getElementById('clipCancelJump'); if (c) c.style.display = 'none';
 }
 
-/* 按钮事件 */
+/* 按钮事件：使用事件代理（clipRetry/clipRetry2 的 DOM 会被动态替换） */
+$('#clipArea').addEventListener('click', e => {
+  if (e.target.closest('#clipRetry') || e.target.closest('#clipRetry2')) {
+    initClipBoard();
+    return;
+  }
+});
+
 $('#clipV8').addEventListener('click', () => {
   cancelAutoJump();
   if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v8');
@@ -1185,9 +1224,6 @@ $('#clipV6').addEventListener('click', () => {
   if (clipInfo.poi) doJumpClaim(clipInfo.poi, 'v6');
   else toast('未识别到店铺 POI');
 });
-
-$('#clipRetry').addEventListener('click', () => initClipBoard());
-$('#clipRetry2').addEventListener('click', () => initClipBoard());
 
 /* 兼容旧 ?jkclip 深链（后端 /resolve，保留原逻辑） */
 async function quickJumpFromClipboard(ver) {
