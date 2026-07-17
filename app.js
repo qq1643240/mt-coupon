@@ -1155,24 +1155,25 @@ async function expandShortLink(shortUrl) {
     'https://api.vvhan.com/api/dpurl?url=',
     'https://tenapi.cn/v2/shorturl?url=',
     'https://60s.viki.moe/api/dpurl?url=',
-    'https://api.vvhan.com/api/dpurl?url='
+    'https://api.oioweb.cn/api/shorturl?url='
   ];
   const dbg = [];
   const sHttps = shortUrl.replace(/^http:/, 'https:');
+  const isReal = u => u && u !== shortUrl && u !== sHttps && !/dpurl\.(cn|com)/.test(u);
 
   for (const base of apis) {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(base + encodeURIComponent(shortUrl), { signal: ctrl.signal, cache: 'no-store' });
+      const r = await fetch(base + encodeURIComponent(sHttps), { signal: ctrl.signal, cache: 'no-store' });
       clearTimeout(t);
       const text = await r.text();
       dbg.push(base.split('?')[0].replace('https://', '') + ':' + (text || '空').slice(0, 60));
       // 从响应里抓所有链接，返回第一个非短链的真实地址
-      const urls = text.match(/https?:\/\/[^\s"'<>\\\]+|meituanw?aimai?:\/\/[^\s"'<>\\\]+|imeituan:\/\/[^\s"'<>\\\]+/gi) || [];
+      const urls = text.match(/https?:\/\/[^\s"'<>]+/gi) || [];
       for (const u of urls) {
         const cu = u.replace(/[)"'\]]+$/, '');
-        if (cu !== shortUrl && cu !== sHttps && !/dpurl\.(cn|com)/.test(cu)) return cu;
+        if (isReal(cu)) return cu;
       }
     } catch (e) {
       dbg.push(base.split('?')[0].replace('https://', '') + ':ERR ' + String(e.message || e).slice(0, 40));
@@ -1187,10 +1188,10 @@ async function expandShortLink(shortUrl) {
       clearTimeout(t);
       let text = '';
       try { text = await r.text(); } catch (e) {}
-      const urls = text.match(/https?:\/\/[^\s"'<>\\\]+/gi) || [];
+      const urls = text.match(/https?:\/\/[^\s"'<>]+/gi) || [];
       for (const u of urls) {
         const cu = u.replace(/[)"'\]]+$/, '');
-        if (cu !== shortUrl && cu !== sHttps && !/dpurl\.(cn|com)/.test(cu)) return cu;
+        if (isReal(cu)) return cu;
       }
     } catch (e) {}
   }
