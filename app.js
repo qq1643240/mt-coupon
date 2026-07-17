@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.55'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.56'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -1146,56 +1146,72 @@ function isShortLink(url) {
     || /waimai\.meituan\.com\/(channel)?\/?$/.test(u) && !/poi_id_str=/.test(u);
 }
 
-/* 前端展开短链：国内可直连短链还原 API 优先，国外代理兜底
-   激进提取：从整个响应文本里找第一个真实 URL（兼容各种返回格式） */
-let lastExpandDebug = '';
+/* 纯前端展开短链（不依赖外部服务）：
+   策略1: XHR 跟随重定向 → xhr.responseURL 拿最终地址（跨域也能读到）
+   策略2: fetch no-cors follow → response.url 兜底
+   策略3: 公共 API 作为最后手段（3s 快速超时）
+ */
 async function expandShortLink(shortUrl) {
+  const target = shortUrl.replace(/^http:/, 'https:');
+  const isValid = url =>
+    url && url !== shortUrl && url !== target &&
+    /^https?:\/\/[a-z]/i.test(url) && !/dpurl\.(cn|com)/i.test(url);
+
+  // ── 策略1：XHR 跟随重定向（responseURL 在大多数浏览器可读，即使跨域）──
+  try {
+    const url = await new Promise((resolve, reject) => {
+      const t = setTimeout(() => resolve(null), 4000); // 4s 超时
+      const x = new XMLHttpRequest();
+      x.open('GET', target, true);
+      x.timeout = 3800;
+      x.onload = () => {
+        clearTimeout(t);
+        const final = x.responseURL || x.getResponseHeader('Location') ||
+          (x.getAllResponseHeaders ? '' : '');
+        resolve(final && isValid(final) ? final : null);
+      };
+      x.onerror = () => { clearTimeout(t); resolve(null); };
+      x.ontimeout = () => { clearTimeout(t); resolve(null); };
+      x.send();
+    });
+    if (url) { lastExpandDebug = 'XHR:' + url.slice(0, 50); return url; }
+  } catch(e) {}
+
+  // ── 策略2：fetch no-cors + redirect follow（部分浏览器暴露最终 URL）──
+  try {
+    const r = await fetch(target, { mode: 'no-cors', redirect: 'follow', cache: 'no-store' });
+    const f = r.url;
+    if (f && isValid(f)) { lastExpandDebug = 'FETCH:' + f.slice(0, 50); return f; }
+  } catch(e) {}
+
+  // ── 策略3：公共 API（快速超时 3s）──
   const apis = [
     'https://api.uomg.com/api/shorturl_restore?url=',
-    'https://api.vvhan.com/api/dpurl?url=',
-    'https://tenapi.cn/v2/shorturl?url=',
-    'https://60s.viki.moe/api/dpurl?url=',
-    'https://api.oioweb.cn/api/shorturl?url='
+    'https://api.vvhan.com/api/dpurl?url='
   ];
-  const dbg = [];
-  const sHttps = shortUrl.replace(/^http:/, 'https:');
-  const isReal = u => u && u !== shortUrl && u !== sHttps && !/dpurl\.(cn|com)/.test(u);
-
   for (const base of apis) {
     try {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(base + encodeURIComponent(sHttps), { signal: ctrl.signal, cache: 'no-store' });
-      clearTimeout(t);
-      const text = await r.text();
-      dbg.push(base.split('?')[0].replace('https://', '') + ':' + (text || '空').slice(0, 60));
-      // 从响应里抓所有链接，返回第一个非短链的真实地址
-      const urls = text.match(/https?:\/\/[^\s"'<>]+/gi) || [];
-      for (const u of urls) {
-        const cu = u.replace(/[)"'\]]+$/, '');
-        if (isReal(cu)) return cu;
+      const timer = setTimeout(() => ctrl.abort(), 3000);
+      const r = await fetch(base + encodeURIComponent(target), { signal: ctrl.signal });
+      clearTimeout(timer);
+      const j = await r.json().catch(() => null);
+      if (!j) continue;
+      // 尝试各种字段名取真实 URL
+      const candidates = [j.data, j.url, j.result?.url, j.short_url, j.long_url,
+                         j.contents && typeof j.contents === 'string' ? null : undefined];
+      for (const c of candidates) {
+        if (c && typeof c === 'string' && isValid(c)) { lastExpandDebug = base.split('/')[2] + ':' + c.slice(0, 50); return c; }
       }
-    } catch (e) {
-      dbg.push(base.split('?')[0].replace('https://', '') + ':ERR ' + String(e.message || e).slice(0, 40));
-    }
+      // 激进：从整个 JSON 文本中提取 URL
+      const raw = JSON.stringify(j);
+      const m = raw.match(/https?:\/\/waimai\.meituan\.com[^\s"'<>\\]{10,200}/i) ||
+                raw.match(/https?:\/\/www\.meituan\.com[^\s"'<>\\]{10,200}/i);
+      if (m && m[0] && isValid(m[0])) { lastExpandDebug = base.split('/')[2] + ':raw:' + m[0].slice(0, 50); return m[0]; }
+    } catch(e) {}
   }
-  // 兜底：国外代理
-  for (const base of ['https://api.allorigins.win/get?url=', 'https://corsproxy.io/?url=']) {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(base + encodeURIComponent(shortUrl), { signal: ctrl.signal, cache: 'no-store' });
-      clearTimeout(t);
-      let text = '';
-      try { text = await r.text(); } catch (e) {}
-      const urls = text.match(/https?:\/\/[^\s"'<>]+/gi) || [];
-      for (const u of urls) {
-        const cu = u.replace(/[)"'\]]+$/, '');
-        if (isReal(cu)) return cu;
-      }
-    } catch (e) {}
-  }
-  lastExpandDebug = dbg.join(' | ');
+
+  lastExpandDebug = 'ALL_FAILED';
   return null;
 }
 
@@ -1238,37 +1254,17 @@ async function initClipBoard() {
   await processClipText(text);
 }
 
-/* 处理剪贴板文本：解析 → 短链展开 → 跳转/展示 */
+/* 处理剪贴板文本：解析 → 短链展开(可选) → 跳转/展示 */
 async function processClipText(text) {
-  if (!text || !text.trim()) { showClipRow('clipRowIdle'); return; }
-  const info = parseClipText(text);
-  if (!info.name) { showClipRow('clipRowIdle'); return; }
-  clipInfo = info;
+  try {
+    if (!text || !text.trim()) { showClipRow('clipRowIdle'); return; }
+    const info = parseClipText(text);
+    if (!info.name) { showClipRow('clipRowIdle'); return; }
+    clipInfo = info;
 
-  // 有 POI → 直接跳转
-  if (info.poi) {
-    const it = autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
-    document.getElementById('clipShopName').textContent = info.name;
-    showClipRow('clipRowJump');
-    startAutoJump(info.poi);
-    render();
-    return;
-  }
-
-  // 无 POI 但有链接 → 尝试展开短链（5s 超时）
-  if (info.url) {
-    document.querySelector('#clipRowLoading .clip-msg').textContent = '展开短链中…';
-    showClipRow('clipRowLoading');
-
-    const timer = new Promise(resolve => setTimeout(() => resolve(null), 5000));
-    const result = await Promise.race([expandShortLink(info.url), timer]);
-    if (result) {
-      const p = extractPoi(result);
-      if (p) { info.poi = p; info.url = result; clipInfo = info; }
-    }
-
+    // 有 POI → 直接跳转
     if (info.poi) {
-      autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
+      const it = autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
       document.getElementById('clipShopName').textContent = info.name;
       showClipRow('clipRowJump');
       startAutoJump(info.poi);
@@ -1276,19 +1272,42 @@ async function processClipText(text) {
       return;
     }
 
-    const shortUrl = info.url.length > 55 ? info.url.slice(0, 52) + '…' : info.url;
-    const isShort = isShortLink(info.url);
-    const el = document.getElementById('clipRowNoPoi');
-    if (el) el.querySelector('.clip-msg').innerHTML =
-      (isShort ? '短链无法展开' : '链接未含 poi_id_str') +
-      (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
-      '<br><small style="opacity:.6;word-break:break-all">' + esc(shortUrl) + '</small>' +
-      ' <a class="clip-retry" id="clipRetry2">重试</a> <a class="clip-manual" id="clipManual">手动粘贴</a>';
-    showClipRow('clipRowNoPoi');
-    return;
-  }
+    // 无 POI 但有链接 → 尝试展开短链（6s 总超时，永不卡死）
+    if (info.url) {
+      document.querySelector('#clipRowLoading .clip-msg').textContent = '展开链接中…';
+      showClipRow('clipRowLoading');
 
-  showClipRow('clipRowIdle');
+      const result = await expandShortLink(info.url);
+      if (result) {
+        const p = extractPoi(result);
+        if (p) { info.poi = p; info.url = result; clipInfo = info; }
+      }
+
+      if (info.poi) {
+        autoSave(info.poi, { name: info.name || '该店铺', logo: null }); save();
+        document.getElementById('clipShopName').textContent = info.name;
+        showClipRow('clipRowJump');
+        startAutoJump(info.poi);
+        render();
+        return;
+      }
+
+      // 展开失败 → 显示 NoPoi（可手动粘贴完整链接）
+      const shortUrl = info.url.length > 55 ? info.url.slice(0, 52) + '…' : info.url;
+      const el = document.getElementById('clipRowNoPoi');
+      if (el) el.querySelector('.clip-msg').innerHTML =
+        '无法获取 poi_id_str' +
+        (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
+        '<br><small style="opacity:.6">' + esc(shortUrl) + '</small>' +
+        '<br>请复制「分享店铺」的长链接 <a class="clip-manual" id="clipManual">粘贴</a>';
+      showClipRow('clipRowNoPoi');
+      return;
+    }
+    showClipRow('clipRowIdle');
+  } catch(e) {
+    console.warn('[clipboard] error:', e);
+    showClipRow('clipRowIdle');
+  }
 }
 
 /* 启动倒计时自动跳转 */
