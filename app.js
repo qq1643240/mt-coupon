@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.56'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.57'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -1147,6 +1147,7 @@ function isShortLink(url) {
 }
 
 /* 纯前端展开短链（不依赖外部服务）：
+   策略0: 如果部署了 CloudBase 云函数，优先使用（国内直连，最可靠）
    策略1: XHR 跟随重定向 → xhr.responseURL 拿最终地址（跨域也能读到）
    策略2: fetch no-cors follow → response.url 兜底
    策略3: 公共 API 作为最后手段（3s 快速超时）
@@ -1156,6 +1157,18 @@ async function expandShortLink(shortUrl) {
   const isValid = url =>
     url && url !== shortUrl && url !== target &&
     /^https?:\/\/[a-z]/i.test(url) && !/dpurl\.(cn|com)/i.test(url);
+
+  // ── 策略0：CloudBase 云函数（国内直连，最可靠）──
+  // 部署后把 CLOUDBASE_EXPAND_URL 改成你的函数地址，例如：
+  // const CLOUDBASE_EXPAND_URL = 'https://<环境ID>.ap-shanghai.app.tcloudbase.com/expand?url=';
+  const CLOUDBASE_EXPAND_URL = '';
+  if (CLOUDBASE_EXPAND_URL) {
+    try {
+      const r = await fetch(CLOUDBASE_EXPAND_URL + encodeURIComponent(target), { cache: 'no-store' });
+      const j = await r.json().catch(() => null);
+      if (j && j.code === 1 && j.url && isValid(j.url)) { lastExpandDebug = 'CB:' + j.url.slice(0, 50); return j.url; }
+    } catch (e) {}
+  }
 
   // ── 策略1：XHR 跟随重定向（responseURL 在大多数浏览器可读，即使跨域）──
   try {
