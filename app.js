@@ -10,7 +10,7 @@
 const STORE_KEY = 'mt_coupon_collection_v2';
 const THEME_KEY = 'mt_coupon_theme';
 const STAT_KEY = 'mt_coupon_stats_v1';
-const VERSION = '1.51'; // 版本号：每次布局更新推送 +0.01
+const VERSION = '1.52'; // 版本号：每次布局更新推送 +0.01
 
 /* 全站领券统计（次数，按 v8/v6 分别计） */
 let stats = loadStats();
@@ -1136,6 +1136,49 @@ function parseClipText(text) {
   return { name, poi, url };
 }
 
+/* 短链域名判断（dpurl.cn 等需展开才能拿到 poi_id_str） */
+function isShortLink(url) {
+  if (!url) return false;
+  const u = String(url).toLowerCase();
+  return /\bdpurl\.(cn|com)\b/.test(u)
+    || /\bmeishi\.(com|cn)\b/.test(u)
+    || /dianping\.com\/(m|shop\/[a-z0-9]+)[\/?]?$/.test(u)
+    || /waimai\.meituan\.com\/(channel)?\/?$/.test(u) && !/poi_id_str=/.test(u);
+}
+
+/* 前端展开短链：用 CORS 代理跟随 302 拿真实 URL
+   代理失败则直接 fetch（部分短链允许读到 response.url） */
+async function expandShortLink(shortUrl) {
+  const candidates = [
+    'https://api.allorigins.win/get?url=',
+    'https://corsproxy.io/?url='
+  ];
+  for (const base of candidates) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(base + encodeURIComponent(shortUrl), { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(t);
+      // allorigins 返回 {status:{url,redirectURL}, contents}
+      if (base.includes('allorigins')) {
+        const j = await r.json().catch(() => null);
+        const final = (j && j.status && (j.status.redirectURL || j.status.url)) || null;
+        if (final) return final;
+      } else {
+        // corsproxy 直接返回目标页 HTML；从响应 URL 拿最终地址
+        const final = r.url && r.url !== base ? r.url : null;
+        if (final && final !== shortUrl) return final;
+      }
+    } catch (e) { /* 试下一个代理 */ }
+  }
+  // 兜底：直接 fetch 跟随跳转（部分短链 response.url 可被读取）
+  try {
+    const r = await fetch(shortUrl.replace(/^http:/, 'https:'), { method: 'GET', redirect: 'follow', mode: 'no-cors' });
+    if (r.url && r.url !== shortUrl) return r.url;
+  } catch (e) {}
+  return null;
+}
+
 /* 切换剪贴板区域显示 */
 function showClipRow(id) {
   ['clipRowIdle', 'clipRowJump', 'clipRowNoPoi', 'clipRowLoading'].forEach(r => {
@@ -1158,6 +1201,18 @@ async function initClipBoard() {
 
   const info = parseClipText(text);
   if (!info.name) { showClipRow('clipRowIdle'); return; }
+
+  // 短链（dpurl.cn 等）不含 poi_id_str → 前端展开跟随跳转拿真实 URL
+  if (info.url && !info.poi && isShortLink(info.url)) {
+    document.querySelector('#clipRowLoading .clip-msg').textContent = '展开短链中…';
+    showClipRow('clipRowLoading');
+    const expanded = await expandShortLink(info.url);
+    if (expanded) {
+      const p = extractPoi(expanded);
+      if (p) { info.poi = p; info.url = expanded; }
+    }
+  }
+
   clipInfo = info;
 
   // 有 POI → 展示店名 + 自动倒计时跳转
@@ -1185,9 +1240,11 @@ async function initClipBoard() {
   // 有链接但无 POI → 展示详情
   if (info.url) {
     const shortUrl = info.url.length > 55 ? info.url.slice(0, 52) + '…' : info.url;
+    const isShort = isShortLink(info.url);
     const el = document.getElementById('clipRowNoPoi');
     if (el) el.querySelector('.clip-msg').innerHTML =
-      '链接未含 poi_id_str' + (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
+      (isShort ? '短链展开失败，请复制完整链接' : '链接未含 poi_id_str') +
+      (info.name ? '（已识别：' + esc(info.name) + '）' : '') +
       '<br><small style="opacity:.6;word-break:break-all">' + esc(shortUrl) + '</small>' +
       ' <a class="clip-retry" id="clipRetry2">重试</a>';
     showClipRow('clipRowNoPoi');
